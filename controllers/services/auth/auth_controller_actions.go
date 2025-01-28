@@ -141,6 +141,12 @@ func bindRole(ctx context.Context, rr *odhtypes.ReconciliationRequest, groups []
 func bindClusterRole(rr *odhtypes.ReconciliationRequest, groups []string, roleBindingName string, roleName string) error {
 	groupsToBind := []rbacv1.Subject{}
 	for _, e := range groups {
+		// we want to disallow adding system:authenticated to the adminGroups
+		if roleName == "admingroupcluster-role" && e == "system:authenticated" {
+			log := logf.FromContext(ctx)
+			log.Info("system:authenticated cannot be added to adminGroups")
+			continue
+		}
 		rs := rbacv1.Subject{
 			Kind:     "Group",
 			APIGroup: "rbac.authorization.k8s.io",
