@@ -37,6 +37,10 @@ var _ common.PlatformObject = (*Monitoring)(nil)
 type MonitoringSpec struct {
 	// monitoring spec exposed to DSCI api
 	MonitoringCommonSpec `json:",inline"`
+	// metrics collection
+	*Metrics `json:"metrics,omitempty"`
+	// traces collection
+	*Traces `json:"traces,omitempty"`
 	// monitoring spec exposed only to internal api
 }
 
@@ -75,6 +79,9 @@ type MetricsResources struct {
 	MemoryRequest resource.Quantity `json:"memoryrequest,omitempty"`
 }
 
+// Traces defines the desired state of traces for the monitoring service
+type Traces struct{}
+
 // MonitoringStatus defines the observed state of Monitoring
 type MonitoringStatus struct {
 	common.Status `json:",inline"`
@@ -110,6 +117,8 @@ type MonitoringCommonSpec struct {
 	Namespace string `json:"namespace,omitempty"`
 	// metrics collection
 	Metrics *Metrics `json:"metrics,omitempty"`
+	// traces collection
+	Traces *Traces `json:"traces,omitempty"`
 }
 
 //+kubebuilder:object:root=true

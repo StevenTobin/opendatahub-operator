@@ -51,11 +51,11 @@ func initialize(_ context.Context, rr *odhtypes.ReconciliationRequest) error {
 // only when DSC has component as Managed and component CR is in "Ready" state, we add rules to Prom Rules.
 // all other cases, we do not change Prom rules for component.
 func updatePrometheusConfigMap(ctx context.Context, rr *odhtypes.ReconciliationRequest) error {
-	// Skip update prom config: if cluster is NOT ManagedRhoai
 	if rr.Release.Name != cluster.ManagedRhoai {
 		return nil
 	}
 
+	// Map component names to their rule prefixes
 	dsc, err := cluster.GetDSC(ctx, rr.Client)
 	if err != nil {
 		if k8serr.IsNotFound(err) {
@@ -97,10 +97,43 @@ func createMonitoringStack(ctx context.Context, rr *odhtypes.ReconciliationReque
 		if msExists, _ := cluster.HasCRD(ctx, rr.Client, gvk.MonitoringStack); !msExists {
 			return errors.New("MonitoringStack CRD not found")
 		}
-		template := []odhtypes.TemplateInfo{
+		templates := []odhtypes.TemplateInfo{
 			{
 				FS:   resourcesFS,
 				Path: MonitoringStackTemplate,
+			},
+			{
+				FS:   resourcesFS,
+				Path: PrometheusRouteTemplate,
+			},
+		}
+
+		rr.Templates = append(rr.Templates, templates...)
+	}
+
+	return nil
+}
+
+func createOpenTelemetryCollector(ctx context.Context, rr *odhtypes.ReconciliationRequest) error {
+	otcExists, _ := cluster.HasCRD(ctx, rr.Client, gvk.OpenTelemetryCollector)
+	if !otcExists {
+		return errors.New("OpentelemetryCollector CRD not found")
+	}
+
+	mon, ok := rr.Instance.(*serviceApi.Monitoring)
+	if !ok {
+		return errors.New("instance is not of type *services.Monitoring")
+	}
+
+	if mon.Spec.Metrics != nil {
+		template := []odhtypes.TemplateInfo{
+			{
+				FS:   resourcesFS,
+				Path: OpenTelemetryCollectorTemplate,
+			},
+			{
+				FS:   resourcesFS,
+				Path: CollectorRBACTemplate,
 			},
 		}
 		rr.Templates = append(rr.Templates, template...)

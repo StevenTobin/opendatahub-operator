@@ -18,15 +18,22 @@ import (
 var resourcesFS embed.FS
 
 const (
-	MonitoringStackTemplate = "resources/monitoring-stack.tmpl.yaml"
-	ManagedStackName        = "rhoai-monitoringstack"
-	OpenDataHubStackName    = "odh-monitoringstack"
+	MonitoringStackTemplate        = "resources/monitoring-stack.tmpl.yaml"
+	OpenTelemetryCollectorTemplate = "resources/opentelemetry-collector.tmpl.yaml"
+	CollectorRBACTemplate          = "resources/collector-rbac.tmpl.yaml"
+	PrometheusRouteTemplate        = "resources/prometheus-route.tmpl.yaml"
+	ManagedStackName               = "rhoai-monitoringstack"
+	OpenDataHubStackName           = "odh-monitoringstack"
+	OpendatahubPipelineName        = "odh-prometheus-collector"
+	ManagedPipelineName            = "rhoai-prometheus-collector"
+	OpendatahubCollectorName       = "odh-collector"
+	ManagedCollectorName           = "rhoai-collector"
 )
 
 func getTemplateData(ctx context.Context, rr *odhtypes.ReconciliationRequest) (map[string]any, error) {
 	monitoring, ok := rr.Instance.(*serviceApi.Monitoring)
 	if !ok {
-		return nil, errors.New("instance is not of type *services.Monitoring")
+		return nil, errors.New("instance is not of type services.Monitoring")
 	}
 
 	if monitoring.Spec.Metrics == nil {
@@ -34,13 +41,21 @@ func getTemplateData(ctx context.Context, rr *odhtypes.ReconciliationRequest) (m
 	}
 
 	var monitoringStackName string
+	var promPipelineName string
+	var otcName string
 	switch rr.Release.Name {
 	case cluster.ManagedRhoai:
 		monitoringStackName = ManagedStackName
+		promPipelineName = ManagedPipelineName
+		otcName = ManagedCollectorName
 	case cluster.SelfManagedRhoai:
 		monitoringStackName = ManagedStackName
+		promPipelineName = ManagedPipelineName
+		otcName = ManagedCollectorName
 	default:
 		monitoringStackName = OpenDataHubStackName
+		promPipelineName = OpendatahubPipelineName
+		otcName = OpendatahubCollectorName
 	}
 	metrics := monitoring.Spec.Metrics
 
@@ -75,6 +90,10 @@ func getTemplateData(ctx context.Context, rr *odhtypes.ReconciliationRequest) (m
 		replicas = metrics.Replicas
 	}
 
+	// Handle nil traces pointer
+	tracesEnabled := monitoring.Spec.Traces != nil
+	metricsEnabled := monitoring.Spec.Metrics != nil
+
 	return map[string]any{
 		"CPULimit":            cpuLimit,
 		"MemoryLimit":         memoryLimit,
@@ -85,7 +104,12 @@ func getTemplateData(ctx context.Context, rr *odhtypes.ReconciliationRequest) (m
 		"MonitoringStackName": monitoringStackName,
 		"Namespace":           monitoring.Spec.Namespace,
 		"Replicas":            strconv.Itoa(int(replicas)),
+		"PromPipelineName":           promPipelineName,
+		"OpenTelemetryCollectorName": otcName,
+		"Traces":                     tracesEnabled,
+		"Metrics":                    metricsEnabled,
 	}, nil
+
 }
 
 func ifGVKInstalled(kvg schema.GroupVersionKind) func(context.Context, *odhtypes.ReconciliationRequest) bool {

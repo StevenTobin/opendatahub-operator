@@ -11,6 +11,7 @@ import (
 	dsciv1 "github.com/opendatahub-io/opendatahub-operator/v2/api/dscinitialization/v1"
 	serviceApi "github.com/opendatahub-io/opendatahub-operator/v2/api/services/v1alpha1"
 	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/status"
+	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/services/monitoring"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster/gvk"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/utils/test/matchers/jq"
@@ -47,6 +48,8 @@ func monitoringTestSuite(t *testing.T) {
 		{"Test Metrics MonitoringStack CR Creation", monitoringServiceCtx.ValidateMonitoringStackCRMetricsWhenSet},
 		{"Test Metrics MonitoringStack CR Configuration", monitoringServiceCtx.ValidateMonitoringStackCRMetricsConfiguration},
 		{"Test Metrics Replicas Configuration", monitoringServiceCtx.ValidateMonitoringStackCRMetricsReplicasUpdate},
+		{"Test OpenTelemetry Collector Deployment", monitoringServiceCtx.ValidateOpenTelemetryCollectorDeployment},
+		{"Test OpenTelemetry Collector Traces Configuration", monitoringServiceCtx.ValidateOpenTelemetryCollectorTracesConfiguration},
 	}
 
 	// Run the test suite.
@@ -196,4 +199,45 @@ func getMonitoringStackName(dsci *dsciv1.DSCInitialization) string {
 	}
 
 	return "odh-monitoringstack"
+}
+
+func (tc *MonitoringTestCtx) ValidateOpenTelemetryCollectorDeployment(t *testing.T) {
+	t.Helper()
+
+	dsci := tc.FetchDSCInitialization()
+
+	collectorName := getOpenTelemetryCollectorName(dsci)
+
+	tc.EnsureResourceExists(
+		WithMinimalObject(gvk.OpenTelemetryCollector, types.NamespacedName{Name: collectorName, Namespace: dsci.Spec.Monitoring.Namespace}),
+	)
+}
+
+func (tc *MonitoringTestCtx) ValidateOpenTelemetryCollectorTracesConfiguration(t *testing.T) {
+	t.Helper()
+
+	dsci := tc.FetchDSCInitialization()
+
+	collectorName := getOpenTelemetryCollectorName(dsci)
+
+	tc.EnsureResourceCreatedOrUpdated(
+		WithMinimalObject(gvk.DSCInitialization, tc.DSCInitializationNamespacedName),
+		WithMutateFunc(testf.Transform(`.spec.monitoring.traces = %s`, `{}`)),
+	)
+
+	tc.EnsureResourceExists(
+		WithMinimalObject(gvk.OpenTelemetryCollector, types.NamespacedName{Name: collectorName, Namespace: dsci.Spec.Monitoring.Namespace}),
+		WithCondition(jq.Match(`.spec.config.service.pipelines | has("traces")`)),
+	)
+}
+
+func getOpenTelemetryCollectorName(dsci *dsciv1.DSCInitialization) string {
+	switch dsci.Status.Release.Name {
+	case cluster.ManagedRhoai:
+		return monitoring.ManagedCollectorName
+	case cluster.SelfManagedRhoai:
+		return monitoring.OpendatahubCollectorName
+	}
+
+	return monitoring.OpendatahubCollectorName
 }
