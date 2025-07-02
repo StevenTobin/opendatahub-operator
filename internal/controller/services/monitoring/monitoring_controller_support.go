@@ -18,16 +18,24 @@ import (
 var resourcesFS embed.FS
 
 const (
-	MonitoringStackTemplate        = "resources/monitoring-stack.tmpl.yaml"
-	OpenTelemetryCollectorTemplate = "resources/opentelemetry-collector.tmpl.yaml"
-	CollectorRBACTemplate          = "resources/collector-rbac.tmpl.yaml"
-	PrometheusRouteTemplate        = "resources/prometheus-route.tmpl.yaml"
-	ManagedStackName               = "rhoai-monitoringstack"
-	OpenDataHubStackName           = "odh-monitoringstack"
-	OpendatahubPipelineName        = "odh-prometheus-collector"
-	ManagedPipelineName            = "rhoai-prometheus-collector"
-	OpendatahubCollectorName       = "odh-collector"
-	ManagedCollectorName           = "rhoai-collector"
+	MonitoringStackTemplate                   = "resources/monitoring-stack.tmpl.yaml"
+	OpenTelemetryCollectorTemplate            = "resources/opentelemetry-collector.tmpl.yaml"
+	CollectorRBACTemplate                     = "resources/collector-rbac.tmpl.yaml"
+	PrometheusRouteTemplate                   = "resources/prometheus-route.tmpl.yaml"
+	ManagedStackName        = "rhoai-monitoringstack"
+	OpenDataHubStackName    = "odh-monitoringstack"
+	PrometheusPipelineName                    = "odh-prometheus-collector"
+	CollectorName                             = "otel"
+	MonitoringStackCRDAvailable               = "MonitoringStackCRDAvailable"
+	MonitoringStackCRDNotFoundReason          = "MonitoringStack CRD Not Found"
+	MonitoringStackCRDNotFoundMessage         = "MonitoringStack CRD not found. Dependent operator missing."
+	MonitoringStackCRDAvailableReason         = "MonitoringStack CRD Found"
+	MonitoringStackCRDAvailableMessage        = "MonitoringStack CRD found"
+	OpenTelemetryCollectorCRDAvailable        = "OpenTelemetryCollectorCRDAvailable"
+	OpenTelemetryCollectorCRDNotFoundReason   = "OpenTelemetryCollector CRD Not Found"
+	OpenTelemetryCollectorCRDNotFoundMessage  = "OpenTelemetryCollector CRD not found. Dependent operator missing."
+	OpenTelemetryCollectorCRDAvailableReason  = "OpenTelemetryCollector CRD Found"
+	OpenTelemetryCollectorCRDAvailableMessage = "OpenTelemetryCollector CRD found"
 )
 
 func getTemplateData(ctx context.Context, rr *odhtypes.ReconciliationRequest) (map[string]any, error) {
@@ -41,21 +49,13 @@ func getTemplateData(ctx context.Context, rr *odhtypes.ReconciliationRequest) (m
 	}
 
 	var monitoringStackName string
-	var promPipelineName string
-	var otcName string
 	switch rr.Release.Name {
 	case cluster.ManagedRhoai:
 		monitoringStackName = ManagedStackName
-		promPipelineName = ManagedPipelineName
-		otcName = ManagedCollectorName
 	case cluster.SelfManagedRhoai:
 		monitoringStackName = ManagedStackName
-		promPipelineName = ManagedPipelineName
-		otcName = ManagedCollectorName
 	default:
 		monitoringStackName = OpenDataHubStackName
-		promPipelineName = OpendatahubPipelineName
-		otcName = OpendatahubCollectorName
 	}
 	metrics := monitoring.Spec.Metrics
 
@@ -104,8 +104,8 @@ func getTemplateData(ctx context.Context, rr *odhtypes.ReconciliationRequest) (m
 		"MonitoringStackName": monitoringStackName,
 		"Namespace":           monitoring.Spec.Namespace,
 		"Replicas":            strconv.Itoa(int(replicas)),
-		"PromPipelineName":           promPipelineName,
-		"OpenTelemetryCollectorName": otcName,
+		"PromPipelineName":           PrometheusPipelineName,
+		"OpenTelemetryCollectorName": CollectorName,
 		"Traces":                     tracesEnabled,
 		"Metrics":                    metricsEnabled,
 	}, nil

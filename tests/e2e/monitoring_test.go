@@ -10,8 +10,8 @@ import (
 
 	dsciv1 "github.com/opendatahub-io/opendatahub-operator/v2/api/dscinitialization/v1"
 	serviceApi "github.com/opendatahub-io/opendatahub-operator/v2/api/services/v1alpha1"
-	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/status"
 	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/services/monitoring"
+	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/status"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster/gvk"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/utils/test/matchers/jq"
@@ -206,10 +206,8 @@ func (tc *MonitoringTestCtx) ValidateOpenTelemetryCollectorDeployment(t *testing
 
 	dsci := tc.FetchDSCInitialization()
 
-	collectorName := getOpenTelemetryCollectorName(dsci)
-
 	tc.EnsureResourceExists(
-		WithMinimalObject(gvk.OpenTelemetryCollector, types.NamespacedName{Name: collectorName, Namespace: dsci.Spec.Monitoring.Namespace}),
+		WithMinimalObject(gvk.OpenTelemetryCollector, types.NamespacedName{Name: monitoring.CollectorName, Namespace: dsci.Spec.Monitoring.Namespace}),
 	)
 }
 
@@ -218,26 +216,13 @@ func (tc *MonitoringTestCtx) ValidateOpenTelemetryCollectorTracesConfiguration(t
 
 	dsci := tc.FetchDSCInitialization()
 
-	collectorName := getOpenTelemetryCollectorName(dsci)
-
 	tc.EnsureResourceCreatedOrUpdated(
 		WithMinimalObject(gvk.DSCInitialization, tc.DSCInitializationNamespacedName),
 		WithMutateFunc(testf.Transform(`.spec.monitoring.traces = %s`, `{}`)),
 	)
 
 	tc.EnsureResourceExists(
-		WithMinimalObject(gvk.OpenTelemetryCollector, types.NamespacedName{Name: collectorName, Namespace: dsci.Spec.Monitoring.Namespace}),
+		WithMinimalObject(gvk.OpenTelemetryCollector, types.NamespacedName{Name: monitoring.CollectorName, Namespace: dsci.Spec.Monitoring.Namespace}),
 		WithCondition(jq.Match(`.spec.config.service.pipelines | has("traces")`)),
 	)
-}
-
-func getOpenTelemetryCollectorName(dsci *dsciv1.DSCInitialization) string {
-	switch dsci.Status.Release.Name {
-	case cluster.ManagedRhoai:
-		return monitoring.ManagedCollectorName
-	case cluster.SelfManagedRhoai:
-		return monitoring.OpendatahubCollectorName
-	}
-
-	return monitoring.OpendatahubCollectorName
 }
