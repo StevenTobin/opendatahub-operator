@@ -140,6 +140,8 @@ func (tc *MonitoringTestCtx) ValidateMonitoringStackCRMetricsConfiguration(t *te
 
 	dsci := tc.FetchDSCInitialization()
 	monitoringStackName := getMonitoringStackName(dsci)
+	m := &serviceApi.Monitoring{}
+	tc.FetchTypedResource(m, WithMinimalObject(gvk.Monitoring, types.NamespacedName{Name: "default-monitoring"}))
 
 	// Use EnsureResourceExists with jq matchers for cleaner validation
 	tc.EnsureResourceExists(
