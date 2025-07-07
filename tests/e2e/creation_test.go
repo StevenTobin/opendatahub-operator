@@ -138,6 +138,7 @@ func (tc *DSCTestCtx) ValidateObservabilityOperatorsInstallation(t *testing.T) {
 			},
 		}
 	}
+	RunTestCases(t, testCases, WithParallel())
 }
 
 // ValidateDSCICreation validates the creation of a DSCInitialization.

@@ -1033,12 +1033,6 @@ spec:
         - apiGroups:
           - opentelemetry.io
           resources:
-          - opentelemetrycollector/finalizers
-          verbs:
-          - update
-        - apiGroups:
-          - opentelemetry.io
-          resources:
           - opentelemetrycollectors
           verbs:
           - create
@@ -1048,6 +1042,12 @@ spec:
           - patch
           - update
           - watch
+        - apiGroups:
+          - opentelemetry.io
+          resources:
+          - opentelemetrycollectors/finalizers
+          verbs:
+          - update
         - apiGroups:
           - opentelemetry.io
           resources:
