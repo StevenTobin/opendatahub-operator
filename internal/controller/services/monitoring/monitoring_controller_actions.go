@@ -146,7 +146,6 @@ func createOpenTelemetryCollector(ctx context.Context, rr *odhtypes.Reconciliati
 		conditions.WithMessage(OpenTelemetryCollectorCRDAvailableMessage),
 	)
 
-
 	mon, ok := rr.Instance.(*serviceApi.Monitoring)
 	if !ok {
 		return errors.New("instance is not of type *services.Monitoring")
