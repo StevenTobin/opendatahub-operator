@@ -13,6 +13,7 @@ import (
 	cr "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/components/registry"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster/gvk"
+	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/controller/conditions"
 	odhtypes "github.com/opendatahub-io/opendatahub-operator/v2/pkg/controller/types"
 	odhdeploy "github.com/opendatahub-io/opendatahub-operator/v2/pkg/deploy"
 )
@@ -94,9 +95,23 @@ func createMonitoringStack(ctx context.Context, rr *odhtypes.ReconciliationReque
 	}
 
 	if monitoring.Spec.Metrics != nil && (monitoring.Spec.Metrics.Resources != nil || monitoring.Spec.Metrics.Storage != nil || monitoring.Spec.Metrics.Replicas != 0) {
-		if msExists, _ := cluster.HasCRD(ctx, rr.Client, gvk.MonitoringStack); !msExists {
-			return errors.New("MonitoringStack CRD not found")
+		msExists, _ := cluster.HasCRD(ctx, rr.Client, gvk.MonitoringStack)
+		if !msExists {
+			rr.Conditions.MarkFalse(
+				MonitoringStackCRDAvailable,
+				conditions.WithReason(MonitoringStackCRDNotFoundReason),
+				conditions.WithMessage(MonitoringStackCRDNotFoundMessage),
+			)
+			return nil
 		}
+
+		// Mark monitoringstack CRD as available when CRD exists
+		rr.Conditions.MarkTrue(
+			MonitoringStackCRDAvailable,
+			conditions.WithReason(MonitoringStackCRDAvailableReason),
+			conditions.WithMessage(MonitoringStackCRDAvailableMessage),
+		)
+
 		templates := []odhtypes.TemplateInfo{
 			{
 				FS:   resourcesFS,
@@ -109,6 +124,8 @@ func createMonitoringStack(ctx context.Context, rr *odhtypes.ReconciliationReque
 		}
 
 		rr.Templates = append(rr.Templates, templates...)
+
+		return nil
 	}
 
 	return nil
@@ -117,8 +134,21 @@ func createMonitoringStack(ctx context.Context, rr *odhtypes.ReconciliationReque
 func createOpenTelemetryCollector(ctx context.Context, rr *odhtypes.ReconciliationRequest) error {
 	otcExists, _ := cluster.HasCRD(ctx, rr.Client, gvk.OpenTelemetryCollector)
 	if !otcExists {
-		return errors.New("OpentelemetryCollector CRD not found")
+		rr.Conditions.MarkFalse(
+			OpenTelemetryCollectorCRDAvailable,
+			conditions.WithReason(OpenTelemetryCollectorCRDNotFoundReason),
+			conditions.WithMessage(OpenTelemetryCollectorCRDNotFoundMessage),
+		)
+		return nil
 	}
+
+	// Mark OpenTelemetryCollector CRD as available when CRD exists
+	rr.Conditions.MarkTrue(
+		OpenTelemetryCollectorCRDAvailable,
+		conditions.WithReason(OpenTelemetryCollectorCRDAvailableReason),
+		conditions.WithMessage(OpenTelemetryCollectorCRDAvailableMessage),
+	)
+
 
 	mon, ok := rr.Instance.(*serviceApi.Monitoring)
 	if !ok {
