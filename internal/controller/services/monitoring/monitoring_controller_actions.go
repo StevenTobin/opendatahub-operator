@@ -59,12 +59,9 @@ func updatePrometheusConfigMap(ctx context.Context, rr *odhtypes.ReconciliationR
 	// Map component names to their rule prefixes
 	dsc, err := cluster.GetDSC(ctx, rr.Client)
 	if err != nil {
-		if k8serr.IsNotFound(err) {
-			// DSC doesn't exist, skip prometheus configmap update
-			return nil
-		}
-		return fmt.Errorf("failed to retrieve DataScienceCluster: %w", err)
+		return fmt.Errorf("failed to get DataScienceCluster instance: %w", err)
 	}
+
 
 	return cr.ForEach(func(ch cr.ComponentHandler) error {
 		ci := ch.NewCRObject(dsc)
