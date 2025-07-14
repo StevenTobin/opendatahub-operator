@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	operatorv1 "github.com/openshift/api/operator/v1"
+	k8serr "k8s.io/apimachinery/pkg/api/errors"
 
 	componentApi "github.com/opendatahub-io/opendatahub-operator/v2/api/components/v1alpha1"
 	serviceApi "github.com/opendatahub-io/opendatahub-operator/v2/api/services/v1alpha1"
@@ -51,6 +52,7 @@ func initialize(_ context.Context, rr *odhtypes.ReconciliationRequest) error {
 // only when DSC has component as Managed and component CR is in "Ready" state, we add rules to Prom Rules.
 // all other cases, we do not change Prom rules for component.
 func updatePrometheusConfigMap(ctx context.Context, rr *odhtypes.ReconciliationRequest) error {
+	// Skip update prom config: if cluster is NOT ManagedRhoai
 	if rr.Release.Name != cluster.ManagedRhoai {
 		return nil
 	}
@@ -58,7 +60,11 @@ func updatePrometheusConfigMap(ctx context.Context, rr *odhtypes.ReconciliationR
 	// Map component names to their rule prefixes
 	dsc, err := cluster.GetDSC(ctx, rr.Client)
 	if err != nil {
-		return fmt.Errorf("failed to get DataScienceCluster instance: %w", err)
+		if k8serr.IsNotFound(err) {
+			// DSC doesn't exist, skip prometheus configmap update
+			return nil
+		}
+		return fmt.Errorf("failed to retrieve DataScienceCluster: %w", err)
 	}
 
 	return cr.ForEach(func(ch cr.ComponentHandler) error {
