@@ -116,14 +116,12 @@ func (tc *DSCTestCtx) ValidateOperatorsInstallation(t *testing.T) {
 func (tc *DSCTestCtx) ValidateObservabilityOperatorsInstallation(t *testing.T) {
 	t.Helper()
 
-	dsci := tc.FetchDSCInitialization()
-
 	// Define operators to be installed.
 	operators := []struct {
 		nn                types.NamespacedName
 		skipOperatorGroup bool
 	}{
-		{nn: types.NamespacedName{Name: telemetryOpName, Namespace: dsci.Spec.Monitoring.Namespace}, skipOperatorGroup: true},
+		{nn: types.NamespacedName{Name: telemetryOpName, Namespace: telemetryOpNamespace}, skipOperatorGroup: false},
 		{nn: types.NamespacedName{Name: observabilityOpName, Namespace: observabilityOpNamespace}, skipOperatorGroup: false},
 	}
 

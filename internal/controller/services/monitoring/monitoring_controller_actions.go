@@ -61,7 +61,6 @@ func updatePrometheusConfigMap(ctx context.Context, rr *odhtypes.ReconciliationR
 		return fmt.Errorf("failed to get DataScienceCluster instance: %w", err)
 	}
 
-
 	return cr.ForEach(func(ch cr.ComponentHandler) error {
 		ci := ch.NewCRObject(dsc)
 		ms := ch.GetManagementState(dsc) // check for modelcontroller with dependency is done in its GetManagementState()

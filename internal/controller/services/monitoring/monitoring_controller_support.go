@@ -22,8 +22,8 @@ const (
 	OpenTelemetryCollectorTemplate            = "resources/opentelemetry-collector.tmpl.yaml"
 	CollectorRBACTemplate                     = "resources/collector-rbac.tmpl.yaml"
 	PrometheusRouteTemplate                   = "resources/prometheus-route.tmpl.yaml"
-	ManagedStackName        = "rhoai-monitoringstack"
-	OpenDataHubStackName    = "odh-monitoringstack"
+	ManagedStackName                          = "rhoai-monitoringstack"
+	OpenDataHubStackName                      = "odh-monitoringstack"
 	PrometheusPipelineName                    = "odh-prometheus-collector"
 	CollectorName                             = "otel"
 	MonitoringStackCRDAvailable               = "MonitoringStackCRDAvailable"
@@ -95,21 +95,20 @@ func getTemplateData(ctx context.Context, rr *odhtypes.ReconciliationRequest) (m
 	metricsEnabled := monitoring.Spec.Metrics != nil
 
 	return map[string]any{
-		"CPULimit":            cpuLimit,
-		"MemoryLimit":         memoryLimit,
-		"CPURequest":          cpuRequest,
-		"MemoryRequest":       memoryRequest,
-		"StorageSize":         storageSize,
-		"StorageRetention":    storageRetention,
-		"MonitoringStackName": monitoringStackName,
-		"Namespace":           monitoring.Spec.Namespace,
-		"Replicas":            strconv.Itoa(int(replicas)),
+		"CPULimit":                   cpuLimit,
+		"MemoryLimit":                memoryLimit,
+		"CPURequest":                 cpuRequest,
+		"MemoryRequest":              memoryRequest,
+		"StorageSize":                storageSize,
+		"StorageRetention":           storageRetention,
+		"MonitoringStackName":        monitoringStackName,
+		"Namespace":                  monitoring.Spec.Namespace,
+		"Replicas":                   strconv.Itoa(int(replicas)),
 		"PromPipelineName":           PrometheusPipelineName,
 		"OpenTelemetryCollectorName": CollectorName,
 		"Traces":                     tracesEnabled,
 		"Metrics":                    metricsEnabled,
 	}, nil
-
 }
 
 func ifGVKInstalled(kvg schema.GroupVersionKind) func(context.Context, *odhtypes.ReconciliationRequest) bool {
