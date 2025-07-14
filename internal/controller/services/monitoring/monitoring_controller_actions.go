@@ -9,6 +9,7 @@ import (
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 
 	componentApi "github.com/opendatahub-io/opendatahub-operator/v2/api/components/v1alpha1"
+	dsciv1 "github.com/opendatahub-io/opendatahub-operator/v2/api/dscinitialization/v1"
 	serviceApi "github.com/opendatahub-io/opendatahub-operator/v2/api/services/v1alpha1"
 	cr "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/components/registry"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster"
@@ -133,6 +134,10 @@ func createMonitoringStack(ctx context.Context, rr *odhtypes.ReconciliationReque
 }
 
 func createOpenTelemetryCollector(ctx context.Context, rr *odhtypes.ReconciliationRequest) error {
+	ok, dsci, _ := checkDSCI(ctx, rr)
+	if !ok || dsci.Spec.Monitoring.ManagementState != operatorv1.Managed {
+		return nil
+	}
 	otcExists, _ := cluster.HasCRD(ctx, rr.Client, gvk.OpenTelemetryCollector)
 	if !otcExists {
 		rr.Conditions.MarkFalse(
@@ -170,4 +175,18 @@ func createOpenTelemetryCollector(ctx context.Context, rr *odhtypes.Reconciliati
 	}
 
 	return nil
+}
+
+func checkDSCI(ctx context.Context, rr *odhtypes.ReconciliationRequest) (bool, *dsciv1.DSCInitialization, error) {
+	dsci, err := cluster.GetDSCI(ctx, rr.Client)
+	// DSCI not found
+	if err != nil && k8serr.IsNotFound(err) {
+		return false, nil, nil
+	}
+	// DSCI found but error
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to get DataScienceClusterInitialization instance: %w", err)
+	}
+
+	return true, dsci, nil
 }
