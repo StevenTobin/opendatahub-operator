@@ -170,6 +170,10 @@ func createOpenTelemetryCollector(ctx context.Context, rr *odhtypes.Reconciliati
 				FS:   resourcesFS,
 				Path: CollectorRBACTemplate,
 			},
+			{
+				FS:   resourcesFS,
+				Path: CollectorServiceMonitorsTemplate,
+			},
 		}
 		rr.Templates = append(rr.Templates, template...)
 	}

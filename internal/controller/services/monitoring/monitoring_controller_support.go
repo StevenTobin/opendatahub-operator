@@ -20,6 +20,7 @@ var resourcesFS embed.FS
 const (
 	MonitoringStackTemplate                   = "resources/monitoring-stack.tmpl.yaml"
 	OpenTelemetryCollectorTemplate            = "resources/opentelemetry-collector.tmpl.yaml"
+	CollectorServiceMonitorsTemplate          = "resources/collector-servicemonitors.tmpl.yaml"
 	CollectorRBACTemplate                     = "resources/collector-rbac.tmpl.yaml"
 	PrometheusRouteTemplate                   = "resources/prometheus-route.tmpl.yaml"
 	ManagedStackName                          = "rhoai-monitoringstack"
