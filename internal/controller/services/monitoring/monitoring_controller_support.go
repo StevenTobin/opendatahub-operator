@@ -15,6 +15,7 @@ import (
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	serviceApi "github.com/opendatahub-io/opendatahub-operator/v2/api/services/v1alpha1"
@@ -255,6 +256,14 @@ func getTemplateData(ctx context.Context, rr *odhtypes.ReconciliationRequest) (m
 
 	templateData["CollectorReplicas"] = monitoring.Spec.CollectorReplicas
 
+	consoleDomain, err := cluster.GetDomain(ctx, rr.Client)
+	if err != nil {
+		logf.FromContext(ctx).Error(err, "failed to get console domain")
+		return templateData, nil
+	}
+
+	templateData["ConsoleDomain"] = consoleDomain
+
 	return templateData, nil
 }
 
@@ -321,47 +330,67 @@ func checkMonitoringPreconditions(ctx context.Context, rr *odhtypes.Reconciliati
 	return allErrors.ErrorOrNil()
 }
 
-func addPrometheusRules(componentName string, rr *odhtypes.ReconciliationRequest) error {
-	componentRules := fmt.Sprintf("%s/monitoring/%s-prometheusrules.tmpl.yaml", componentName, componentName)
-
-	if !common.FileExists(componentMonitoring.ComponentRulesFS, componentRules) {
-		return fmt.Errorf("prometheus rules file for component %s not found", componentName)
+func addMonitoringConfiguration(componentName string, rr *odhtypes.ReconciliationRequest) error {
+	monitoring, ok := rr.Instance.(*serviceApi.Monitoring)
+	if !ok {
+		return errors.New("instance is not of type services.Monitoring")
+	}
+	// Define monitoring templates to check for
+	monitoringTemplates := []struct {
+		suffix string
+	}{
+		{"prometheusrules"},
+		{"servicemonitor"},
+		{"podmonitor"},
+		{"probe"},
 	}
 
-	rr.Templates = append(rr.Templates, odhtypes.TemplateInfo{
-		FS:   componentMonitoring.ComponentRulesFS,
-		Path: componentRules,
-	})
+	for _, template := range monitoringTemplates {
+		// if alerting is not enabled, don't add prometheus rules
+		if template.suffix == "prometheusrules" {
+			if monitoring.Spec.Alerting == nil {
+				continue
+			}
+		}
+		templatePath := fmt.Sprintf("%s/monitoring/%s-%s.tmpl.yaml", componentName, componentName, template.suffix)
+		if common.FileExists(componentMonitoring.ComponentRulesFS, templatePath) {
+			rr.Templates = append(rr.Templates, odhtypes.TemplateInfo{
+				FS:   componentMonitoring.ComponentRulesFS,
+				Path: templatePath,
+			})
+		}
+	}
 
 	return nil
 }
 
 // if a component is disabled, we need to delete the prometheus rules. If the DSCI is deleted
 // the rules will be gc'd automatically.
-func cleanupPrometheusRules(ctx context.Context, componentName string, rr *odhtypes.ReconciliationRequest) error {
-	// Fetch monitoring namespace from DSCI
-	monitoringNamespace, err := cluster.MonitoringNamespace(ctx, rr.Client)
-	if err != nil {
-		if k8serr.IsNotFound(err) {
-			// No DSCI means no monitoring namespace configured, nothing to clean up
-			return nil
-		}
-		return err
+func cleanupMonitoringConfiguration(ctx context.Context, componentName string, rr *odhtypes.ReconciliationRequest) error {
+	monitoringResources := []struct {
+		suffix string
+		gvk    schema.GroupVersionKind
+	}{
+		{"prometheusrules", gvk.COOPrometheusRule},
+		{"servicemonitor", gvk.ServiceMonitor},
+		{"podmonitor", gvk.PodMonitor},
+		{"probe", gvk.Probe},
 	}
 
-	pr := &unstructured.Unstructured{}
-	pr.SetGroupVersionKind(gvk.PrometheusRule)
-	pr.SetName(fmt.Sprintf("%s-prometheusrules", componentName))
-	pr.SetNamespace(monitoringNamespace)
+	var multiErr *multierror.Error
 
-	if err := rr.Client.Delete(ctx, pr); err != nil {
-		if k8serr.IsNotFound(err) {
-			return nil
+	for _, resource := range monitoringResources {
+		obj := &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(resource.gvk)
+		obj.SetName(fmt.Sprintf("%s-%s", componentName, resource.suffix))
+		obj.SetNamespace(rr.Instance.(*serviceApi.Monitoring).Spec.Namespace)
+
+		if err := rr.Client.Delete(ctx, obj); err != nil && !k8serr.IsNotFound(err) {
+			multiErr = multierror.Append(multiErr, fmt.Errorf("failed to delete %s for component %s: %w", resource.suffix, componentName, err))
 		}
-		return fmt.Errorf("failed to delete prometheus rule for component %s: %w", componentName, err)
 	}
 
-	return nil
+	return multiErr.ErrorOrNil()
 }
 
 // addMetricsData adds metrics configuration data to the template data map.

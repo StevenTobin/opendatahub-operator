@@ -523,16 +523,34 @@ var (
 		Kind:    "Instrumentation",
 	}
 
-	ServiceMonitor = schema.GroupVersionKind{
+	COOServiceMonitor = schema.GroupVersionKind{
 		Group:   "monitoring.rhobs",
 		Version: "v1",
 		Kind:    "ServiceMonitor",
 	}
 
-	PrometheusRule = schema.GroupVersionKind{
+	COOPrometheusRule = schema.GroupVersionKind{
 		Group:   "monitoring.rhobs",
 		Version: "v1",
 		Kind:    "PrometheusRule",
+	}
+
+	ThanosQuerier = schema.GroupVersionKind{
+		Group:   "monitoring.rhobs",
+		Version: "v1alpha1",
+		Kind:    "ThanosQuerier",
+	}
+
+	Probe = schema.GroupVersionKind{
+		Group:   "monitoring.rhobs",
+		Version: "v1",
+		Kind:    "Probe",
+	}
+
+	COOPodMonitor = schema.GroupVersionKind{
+		Group:   "monitoring.rhobs",
+		Version: "v1",
+		Kind:    "PodMonitor",
 	}
 
 	ServiceMesh = schema.GroupVersionKind{
@@ -541,10 +559,23 @@ var (
 		Kind:    serviceApi.ServiceMeshKind,
 	}
 
-	ThanosQuerier = schema.GroupVersionKind{
-		Group:   "monitoring.rhobs",
-		Version: "v1alpha1",
-		Kind:    "ThanosQuerier",
+
+	PodMonitor = schema.GroupVersionKind{
+		Group:   "monitoring.coreos.com",
+		Version: "v1",
+		Kind:    "PodMonitor",
+	}
+
+	ServiceMonitor = schema.GroupVersionKind{
+		Group:   "monitoring.coreos.com",
+		Version: "v1",
+		Kind:    "ServiceMonitor",
+	}
+
+	Authorino = schema.GroupVersionKind{
+		Group:   "operator.authorino.kuadrant.io",
+		Version: "v1beta1",
+		Kind:    "Authorino",
 	}
 
 	ValidatingAdmissionPolicy = schema.GroupVersionKind{

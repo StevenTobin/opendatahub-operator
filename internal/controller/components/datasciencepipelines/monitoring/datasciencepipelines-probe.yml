@@ -1,0 +1,10 @@
+kind: Probe
+apiVersion: monitoring.rhobs/v1
+metadata:
+  namespace: {{.Namespace}}
+  name: dashboard-probe
+spec:
+  targets:
+    staticConfig:
+      static:
+        - 'data-science-pipelines-operator-service.{{.Namespace}}.svc:8080/metrics'

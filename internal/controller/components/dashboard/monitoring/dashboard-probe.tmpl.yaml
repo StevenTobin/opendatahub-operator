@@ -1,0 +1,10 @@
+kind: Probe
+apiVersion: monitoring.rhobs/v1
+metadata:
+  namespace: {{.Namespace}}
+  name: dashboard-probe
+spec:
+  targets:
+    staticConfig:
+      static:
+        - 'rhods-dashboard-{{.Namespace}}.{{.ConsoleDomain}}'

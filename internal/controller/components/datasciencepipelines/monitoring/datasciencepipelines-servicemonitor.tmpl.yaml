@@ -1,0 +1,27 @@
+kind: ServiceMonitor
+apiVersion: monitoring.coreos.com/v1
+metadata:
+  namespace: opendatahub
+  name: datasciencepipelines-operator-servicemonitor
+spec:
+  endpoints:
+    - honorLabels: true
+      path: /metrics
+      port: metrics
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: data-science-pipelines-operator
+---
+kind: ServiceMonitor
+apiVersion: monitoring.coreos.com/v1
+metadata:
+  namespace: opendatahub
+  name: datasciencepipelines-application-servicemonitor
+spec:
+  endpoints:
+    - honorLabels: true
+      path: /metrics
+      port: metrics
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: data-science-pipelines-application

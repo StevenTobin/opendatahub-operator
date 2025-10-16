@@ -4,8 +4,32 @@ metadata:
   name: data-science-collector
   namespace: {{.Namespace}}
 spec:
+  volumeMounts:
+    - name: cabundle-volume
+      mountPath: /etc/pki/ca-trust/source/service-ca
+      readOnly: true
+  volumes:
+    - name: cabundle-volume
+      configMap:
+        name: cabundle
   replicas: {{.CollectorReplicas}}
-  mode: deployment
+  mode: statefulset
+  targetAllocator:
+    enabled: true
+    serviceAccount: data-science-collector-collector
+    prometheusCR:
+      enabled: true
+      podMonitorSelector: 
+        matchExpressions:
+          - key: platform.opendatahub.io/part-of
+            operator: In
+            values: monitoring
+      serviceMonitorSelector: 
+        matchLabels:
+          platform.opendatahub.io/part-of: monitoring
+      probeSelector: 
+        matchLabels:
+          platform.opendatahub.io/part-of: monitoring
   config:
     extensions:
       bearertokenauth:
@@ -15,24 +39,48 @@ spec:
       prometheus:
         config:
           scrape_configs:
-            - job_name: 'data-science-collector-prometheus'
-              bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
-              kubernetes_sd_configs:
-                - role: pod
-              metrics_path: /metrics
-              relabel_configs:
-                - action: keep
-                  regex: true
-                  source_labels: [__meta_kubernetes_pod_label_monitoring_opendatahub_io_scrape]
-                - action: replace
-                  regex: '([^:]+)(?::\d+)?'
-                  replacement: '$1:8080'
-                  source_labels: [__address__]
-                  target_label: __address__
+            - job_name: 'Federate Prometheus'
               scrape_interval: 30s
-              scrape_timeout: 10s
+              scheme: https
+              tls_config:
+                ca_file: /etc/pki/ca-trust/source/service-ca/service-ca.crt
+              bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              honor_labels: false
+              metrics_path: '/federate'
+              params:
+                'match[]':
+                  - '{__name__= "haproxy_backend_http_responses_total"}'
+                  - '{__name__= "controller_runtime_reconcile_total"}'
+                  - '{__name__= "container_cpu_usage_seconds_total"}'
+                  - '{__name__= "container_memory_rss"}'
+                  - '{__name__= "kubelet_volume_stats_used_bytes"}'
+                  - '{__name__= "kubelet_volume_stats_capacity_bytes"}'
+                  - '{__name__= "kube_pod_container_status_waiting_reason"}'
+                  - '{__name__= "kube_pod_container_status_restarts_total"}'
+                  - '{__name__= "kube_pod_container_status_terminated_reason"}'
+                  - '{__name__= "openshift_build_status_phase_total"}'
+                  - '{__name__= "kube_statefulset_replicas"}'
+              static_configs:
+                - targets:
+                  - "prometheus-k8s.openshift-monitoring.svc.cluster.local:9091"
+            - job_name: 'Llama Stack K8s Operator'
+              metrics_path: /metrics
+              scheme: https
               tls_config:
                 insecure_skip_verify: true
+              params:
+                module: [http_2xx]
+              authorization:
+                credentials_file: /run/secrets/kubernetes.io/serviceaccount/token
+              kubernetes_sd_configs:
+                - role: service
+                  namespaces:
+                    names:
+                      - {{.Namespace}}
+              relabel_configs:
+                - action: keep
+                  regex: '.*llama-stack-k8s-operator-controller-manager-metrics-service'
+                  source_labels: [__address__]
             {{- if .AcceleratorMetrics }}
             - job_name: 'dcgm-exporter-accelerator-metrics'
               bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
@@ -133,6 +181,8 @@ spec:
       resourcedetection:
         detectors: [openshift]
     exporters:
+      debug:
+        verbosity: detailed
       {{- if .Metrics }}
       prometheus:
         endpoint: 0.0.0.0:8889

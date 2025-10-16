@@ -633,8 +633,8 @@ func (tc *MonitoringTestCtx) ValidatePrometheusRulesLifecycle(t *testing.T) {
 		WithMinimalObject(gvk.Dashboard, types.NamespacedName{Name: "default-dashboard", Namespace: tc.AppsNamespace}),
 		WithCondition(HaveLen(1)),
 	)
-	tc.EnsureResourceExists(WithMinimalObject(gvk.PrometheusRule, types.NamespacedName{Name: "dashboard-prometheusrules", Namespace: tc.MonitoringNamespace}))
-	tc.EnsureResourceExists(WithMinimalObject(gvk.PrometheusRule, types.NamespacedName{Name: "operator-prometheusrules", Namespace: tc.MonitoringNamespace}))
+	tc.EnsureResourceExists(WithMinimalObject(gvk.COOPrometheusRule, types.NamespacedName{Name: "dashboard-prometheusrules", Namespace: tc.MonitoringNamespace}))
+	tc.EnsureResourceExists(WithMinimalObject(gvk.COOPrometheusRule, types.NamespacedName{Name: "operator-prometheusrules", Namespace: tc.MonitoringNamespace}))
 
 	// Disable both dashboard and monitoring
 	tc.resetMonitoringConfigToRemoved()
@@ -644,8 +644,8 @@ func (tc *MonitoringTestCtx) ValidatePrometheusRulesLifecycle(t *testing.T) {
 	)
 
 	// Verify both Prometheus rules are deleted
-	tc.EnsureResourceGone(WithMinimalObject(gvk.PrometheusRule, types.NamespacedName{Name: "dashboard-prometheusrules", Namespace: tc.MonitoringNamespace}))
-	tc.EnsureResourceGone(WithMinimalObject(gvk.PrometheusRule, types.NamespacedName{Name: "operator-prometheusrules", Namespace: tc.MonitoringNamespace}))
+	tc.EnsureResourceGone(WithMinimalObject(gvk.COOPrometheusRule, types.NamespacedName{Name: "dashboard-prometheusrules", Namespace: tc.MonitoringNamespace}))
+	tc.EnsureResourceGone(WithMinimalObject(gvk.COOPrometheusRule, types.NamespacedName{Name: "operator-prometheusrules", Namespace: tc.MonitoringNamespace}))
 
 	// Cleanup: Remove alerting configuration from DSCInitialization to prevent validation issues
 	// This ensures that subsequent tests can set metrics=null without violating the validation rule

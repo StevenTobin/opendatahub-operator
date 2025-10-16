@@ -1,0 +1,13 @@
+kind: Probe
+apiVersion: monitoring.rhobs/v1
+metadata:
+  namespace: {{.Namespace}}
+  name: workbenches-probe
+spec:
+  jobName: workbenches-probe
+  module: http_2xx
+  targets: 
+    staticConfig:
+      static: 
+      - notebook-controller-service.{{.Namespace}}.svc:8080/metrics 
+      - odh-notebook-controller-service.{{.Namespace}}.svc:8080/metrics

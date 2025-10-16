@@ -1,0 +1,21 @@
+kind: PodMonitor
+apiVersion: monitoring.rhobs/v1
+metadata:
+  namespace: {{.Namespace}}
+  name: data-science-operator-podmonitor
+spec:
+  endpoints:
+    - bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      honorLabels: true
+      path: /metrics
+      scheme: http
+      relabelings:
+        - source_labels: [__meta_kubernetes_service_name]
+          regex: ^({{operatorName}}-operator)$
+          target_label: kubernetes_name
+          action: keep
+        - source_labels: [__address__]
+          regex: (.*):(\d+)
+          target_label: __address__
+          replacement: ${1}:8080
+          action: replace

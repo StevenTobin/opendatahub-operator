@@ -97,8 +97,8 @@ func (h *serviceHandler) NewReconciler(ctx context.Context, mgr ctrl.Manager) er
 		OwnsGVK(gvk.TempoStack, reconciler.Dynamic(reconciler.CrdExists(gvk.TempoStack))).
 		OwnsGVK(gvk.Instrumentation, reconciler.Dynamic(reconciler.CrdExists(gvk.Instrumentation))).
 		OwnsGVK(gvk.OpenTelemetryCollector, reconciler.Dynamic(reconciler.CrdExists(gvk.OpenTelemetryCollector))).
-		OwnsGVK(gvk.ServiceMonitor, reconciler.Dynamic(reconciler.CrdExists(gvk.ServiceMonitor))).
-		OwnsGVK(gvk.PrometheusRule, reconciler.Dynamic(reconciler.CrdExists(gvk.PrometheusRule))).
+		OwnsGVK(gvk.COOServiceMonitor, reconciler.Dynamic(reconciler.CrdExists(gvk.COOServiceMonitor))).
+		OwnsGVK(gvk.COOPrometheusRule, reconciler.Dynamic(reconciler.CrdExists(gvk.COOPrometheusRule))).
 		OwnsGVK(gvk.ThanosQuerier, reconciler.Dynamic(reconciler.CrdExists(gvk.ThanosQuerier))).
 		// operands - watched
 		//
@@ -131,6 +131,7 @@ func (h *serviceHandler) NewReconciler(ctx context.Context, mgr ctrl.Manager) er
 		WithAction(deployMonitoringStackWithQuerier).
 		WithAction(deployTracingStack).
 		WithAction(deployAlerting).
+		WithAction(deployComponentMonitoring).
 		WithAction(deployOpenTelemetryCollector).
 		WithAction(template.NewAction(
 			template.WithDataFn(getTemplateData),
