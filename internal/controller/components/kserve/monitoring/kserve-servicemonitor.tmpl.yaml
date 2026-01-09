@@ -1,0 +1,19 @@
+kind: ServiceMonitor
+apiVersion: monitoring.coreos.com/v1
+metadata:
+  namespace: {{.Namespace}}
+  name: kserve-servicemonitor
+  labels:
+    monitoring.opendatahub.io/scrape: "true"
+spec:
+  endpoints:
+    - bearerTokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+      honorLabels: true
+      path: /metrics
+      port: https
+      tlsConfig:
+        insecureSkipVerify: true
+      scheme: https
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: kserve

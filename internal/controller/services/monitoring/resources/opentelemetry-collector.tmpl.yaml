@@ -5,7 +5,24 @@ metadata:
   namespace: {{.Namespace}}
 spec:
   replicas: {{.CollectorReplicas}}
-  mode: deployment
+  mode: statefulset
+  targetAllocator:
+    enabled: true
+    serviceAccount: data-science-collector-collector
+    prometheusCR:
+      enabled: true
+      podMonitorSelector: 
+        matchExpressions:
+          - key: platform.opendatahub.io/part-of
+            operator: In
+            values:
+              - monitoring
+      serviceMonitorSelector: 
+        matchLabels:
+          platform.opendatahub.io/part-of: monitoring
+      probeSelector: 
+        matchLabels:
+          platform.opendatahub.io/part-of: monitoring
   resources:
     limits:
       cpu: {{.CollectorCPULimit}}

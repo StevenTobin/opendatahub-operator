@@ -9,7 +9,6 @@ import (
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	componentApi "github.com/opendatahub-io/opendatahub-operator/v2/api/components/v1alpha1"
 	serviceApi "github.com/opendatahub-io/opendatahub-operator/v2/api/services/v1alpha1"
@@ -339,7 +338,9 @@ func deployOpenTelemetryCollector(ctx context.Context, rr *odhtypes.Reconciliati
 	return nil
 }
 
-func deployAlerting(ctx context.Context, rr *odhtypes.ReconciliationRequest) error {
+// checkAlerting checks if alerting is configured and if the required CRDs exist.
+// the alerting rules are deployed in the deployComponentMonitoring action.
+func checkAlerting(ctx context.Context, rr *odhtypes.ReconciliationRequest) error {
 	monitoring, ok := rr.Instance.(*serviceApi.Monitoring)
 	if !ok {
 		return errors.New("instance is not of type *services.Monitoring")
@@ -369,14 +370,35 @@ func deployAlerting(ctx context.Context, rr *odhtypes.ReconciliationRequest) err
 	}
 
 	rr.Conditions.MarkTrue(status.ConditionAlertingAvailable)
-	// Add operator prometheus rules, we can deploy operator alerts without any components
-	templates := []odhtypes.TemplateInfo{
-		{
-			FS:   resourcesFS,
-			Path: "monitoring/operator-prometheusrules.tmpl.yaml",
-		},
+	return nil
+}
+
+func deployComponentMonitoring(ctx context.Context, rr *odhtypes.ReconciliationRequest) error {
+	monitoring, ok := rr.Instance.(*serviceApi.Monitoring)
+	if !ok {
+		return errors.New("instance is not of type *services.Monitoring")
 	}
-	rr.Templates = append(rr.Templates, templates...)
+
+	if monitoring.Spec.Metrics == nil {
+		return nil
+	}
+
+	if monitoring.Spec.Alerting != nil {
+		// Add operator prometheus rules, we can deploy operator alerts without any components
+		templates := []odhtypes.TemplateInfo{
+			{
+				FS:   resourcesFS,
+				Path: "monitoring/operator-prometheusrules.tmpl.yaml",
+			},
+		}
+		rr.Templates = append(rr.Templates, templates...)
+
+		// check if alerting is configured and if the required CRDs exist.
+		err := checkAlerting(ctx, rr)
+		if err != nil {
+			return err
+		}
+	}
 
 	dsc, err := cluster.GetDSC(ctx, rr.Client)
 	if err != nil {
@@ -387,37 +409,20 @@ func deployAlerting(ctx context.Context, rr *odhtypes.ReconciliationRequest) err
 		return fmt.Errorf("failed to retrieve DataScienceCluster: %w", err)
 	}
 
-	// Add component prometheus rules for each enabled and ready component.
-	// Collect errors for each component and report them at the end.
-	// Component A could succeed, component B could fail and component C could succeed.
-	// Log which components actually failed rather than just bailing out early.
-	var addErrors []error
-	var cleanupErrors []error
+	// Add component monitoring configuration for each enabled component.
 
 	forEachErr := cr.ForEach(func(ch cr.ComponentHandler) error {
 		componentName := ch.GetName()
-		ci := ch.NewCRObject(dsc)
 
 		if ch.IsEnabled(dsc) {
-			ready, err := isComponentReady(ctx, rr.Client, ci)
-			if err != nil {
-				addErrors = append(addErrors, fmt.Errorf("failed to get status for component %s: %w", componentName, err))
-				return nil // Continue processing other components
-			}
-			if !ready {
-				return nil
-			}
-			// component is ready, add alerting rules
-			if err := addPrometheusRules(componentName, rr); err != nil {
-				addErrors = append(addErrors, fmt.Errorf("failed to add prometheus rules for component %s: %w", componentName, err))
-				return nil // Continue processing other components
+			if monitoring.Spec.Alerting != nil {
+				addPrometheusRules(componentName, rr)
+				addServiceMonitor(componentName, rr)
 			}
 		} else {
-			// component is not enabled, check if prometheus rules exist and cleanup if they do
-			if err := cleanupPrometheusRules(ctx, componentName, rr); err != nil {
-				cleanupErrors = append(cleanupErrors, fmt.Errorf("failed to cleanup prometheus rules for component %s: %w", componentName, err))
-				return nil // Continue processing other components
-			}
+			// component is not enabled, check if prometheus rules and servicemonitor exist and cleanup if they do
+			cleanupPrometheusRules(ctx, componentName, rr)
+			cleanupServiceMonitor(ctx, componentName, rr)
 		}
 		return nil
 	})
@@ -427,24 +432,17 @@ func deployAlerting(ctx context.Context, rr *odhtypes.ReconciliationRequest) err
 		return fmt.Errorf("failed to iterate components: %w", forEachErr)
 	}
 
-	// If we fail to add prometheus rules for a component.
-	if len(addErrors) > 0 {
-		// Log errors but don't fail the reconciliation
-		for _, addErr := range addErrors {
-			logf.FromContext(ctx).Error(addErr, "Failed to add prometheus rules for component")
-		}
+	return nil
+}
+
+func addcomponentMonitoring(ctx context.Context, rr *odhtypes.ReconciliationRequest) error {
+	monitoring, ok := rr.Instance.(*serviceApi.Monitoring)
+	if !ok {
+		return errors.New("instance is not of type *services.Monitoring")
 	}
 
-	// If we fail to clean up prometheus rules for a component.
-	if len(cleanupErrors) > 0 {
-		// Log errors but don't fail the reconciliation
-		for _, cleanupErr := range cleanupErrors {
-			logf.FromContext(ctx).Error(cleanupErr, "Failed to cleanup prometheus rules for component")
-		}
-	}
-
-	if len(addErrors) > 0 || len(cleanupErrors) > 0 {
-		return errors.New("errors occurred while adding or cleaning up prometheus rules for components")
+	if monitoring.Spec.Metrics == nil {
+		return nil
 	}
 
 	return nil

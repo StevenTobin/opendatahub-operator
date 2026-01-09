@@ -68,7 +68,7 @@ var componentIDRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*(?:/[A-Za-z0-9][A-
 // that we depend on. When upgrading COO, verify Perses image compatibility and update accordingly.
 // The current image is compatible with COO 1.2.2.
 func getPersesImage() string {
-	if image := os.Getenv("RELATED_IMAGE_PERSES"); image != "" {
+	if image := os.Getenv("RELATED_IMAGE_PERSES_IMAGE"); image != "" {
 		return image
 	}
 
@@ -417,32 +417,41 @@ func checkMonitoringPreconditions(ctx context.Context, rr *odhtypes.Reconciliati
 	return allErrors.ErrorOrNil()
 }
 
-func addPrometheusRules(componentName string, rr *odhtypes.ReconciliationRequest) error {
+func addPrometheusRules(componentName string, rr *odhtypes.ReconciliationRequest) {
 	componentRules := fmt.Sprintf("%s/monitoring/%s-prometheusrules.tmpl.yaml", componentName, componentName)
 
 	if !common.FileExists(componentMonitoring.ComponentRulesFS, componentRules) {
-		return fmt.Errorf("prometheus rules file for component %s not found", componentName)
 	}
 
 	rr.Templates = append(rr.Templates, odhtypes.TemplateInfo{
 		FS:   componentMonitoring.ComponentRulesFS,
 		Path: componentRules,
 	})
+}
 
-	return nil
+func addServiceMonitor(componentName string, rr *odhtypes.ReconciliationRequest) {
+	serviceMonitor := fmt.Sprintf("%s/monitoring/%s-servicemonitor.tmpl.yaml", componentName, componentName)
+
+	if !common.FileExists(componentMonitoring.ComponentRulesFS, serviceMonitor) {
+	}
+
+	rr.Templates = append(rr.Templates, odhtypes.TemplateInfo{
+		FS:   componentMonitoring.ComponentRulesFS,
+		Path: serviceMonitor,
+	})
+
 }
 
 // if a component is disabled, we need to delete the prometheus rules. If the DSCI is deleted
 // the rules will be gc'd automatically.
-func cleanupPrometheusRules(ctx context.Context, componentName string, rr *odhtypes.ReconciliationRequest) error {
+func cleanupPrometheusRules(ctx context.Context, componentName string, rr *odhtypes.ReconciliationRequest) {
 	// Fetch monitoring namespace from DSCI
 	monitoringNamespace, err := cluster.MonitoringNamespace(ctx, rr.Client)
 	if err != nil {
 		if k8serr.IsNotFound(err) {
 			// No DSCI means no monitoring namespace configured, nothing to clean up
-			return nil
+			return
 		}
-		return err
 	}
 
 	pr := &unstructured.Unstructured{}
@@ -452,12 +461,33 @@ func cleanupPrometheusRules(ctx context.Context, componentName string, rr *odhty
 
 	if err := rr.Client.Delete(ctx, pr); err != nil {
 		if k8serr.IsNotFound(err) {
-			return nil
+			return
 		}
-		return fmt.Errorf("failed to delete prometheus rule for component %s: %w", componentName, err)
+	}
+}
+
+// if a component is disabled, we need to delete the servicemonitor. If the DSCI is deleted
+// the servicemonitor will be gc'd automatically.
+func cleanupServiceMonitor(ctx context.Context, componentName string, rr *odhtypes.ReconciliationRequest) {
+	// Fetch monitoring namespace from DSCI
+	monitoringNamespace, err := cluster.MonitoringNamespace(ctx, rr.Client)
+	if err != nil {
+		if k8serr.IsNotFound(err) {
+			// No DSCI means no monitoring namespace configured, nothing to clean up
+			return
+		}
 	}
 
-	return nil
+	sm := &unstructured.Unstructured{}
+	sm.SetGroupVersionKind(gvk.ServiceMonitor)
+	sm.SetName(fmt.Sprintf("%s-servicemonitor", componentName))
+	sm.SetNamespace(monitoringNamespace)
+
+	if err := rr.Client.Delete(ctx, sm); err != nil {
+		if k8serr.IsNotFound(err) {
+			return
+		}
+	}
 }
 
 // addMetricsData adds metrics configuration data to the template data map.
