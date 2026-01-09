@@ -435,19 +435,6 @@ func deployComponentMonitoring(ctx context.Context, rr *odhtypes.ReconciliationR
 	return nil
 }
 
-func addcomponentMonitoring(ctx context.Context, rr *odhtypes.ReconciliationRequest) error {
-	monitoring, ok := rr.Instance.(*serviceApi.Monitoring)
-	if !ok {
-		return errors.New("instance is not of type *services.Monitoring")
-	}
-
-	if monitoring.Spec.Metrics == nil {
-		return nil
-	}
-
-	return nil
-}
-
 func deployPerses(ctx context.Context, rr *odhtypes.ReconciliationRequest) error {
 	monitoring, ok := rr.Instance.(*serviceApi.Monitoring)
 	if !ok {

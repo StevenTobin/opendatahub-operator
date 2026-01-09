@@ -421,6 +421,7 @@ func addPrometheusRules(componentName string, rr *odhtypes.ReconciliationRequest
 	componentRules := fmt.Sprintf("%s/monitoring/%s-prometheusrules.tmpl.yaml", componentName, componentName)
 
 	if !common.FileExists(componentMonitoring.ComponentRulesFS, componentRules) {
+		return
 	}
 
 	rr.Templates = append(rr.Templates, odhtypes.TemplateInfo{
@@ -433,13 +434,13 @@ func addServiceMonitor(componentName string, rr *odhtypes.ReconciliationRequest)
 	serviceMonitor := fmt.Sprintf("%s/monitoring/%s-servicemonitor.tmpl.yaml", componentName, componentName)
 
 	if !common.FileExists(componentMonitoring.ComponentRulesFS, serviceMonitor) {
+		return
 	}
 
 	rr.Templates = append(rr.Templates, odhtypes.TemplateInfo{
 		FS:   componentMonitoring.ComponentRulesFS,
 		Path: serviceMonitor,
 	})
-
 }
 
 // if a component is disabled, we need to delete the prometheus rules. If the DSCI is deleted
