@@ -45,3 +45,10 @@ cluster-health-workload-l:
 	go run ./cmd/health-check -layer=workload -l
 cluster-health-operator-layer-l:
 	go run ./cmd/health-check -layer=operator -l
+
+# Manifest path validation: verify that upstream component paths exist.
+.PHONY: validate-manifests validate-manifests-json
+validate-manifests:
+	go run ./cmd/health-check validate manifests
+validate-manifests-json:
+	go run ./cmd/health-check validate manifests -json

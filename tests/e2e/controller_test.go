@@ -300,6 +300,9 @@ func TestOdhOperator(t *testing.T) {
 
 	log.SetLogger(zap.New(zap.UseDevMode(true)))
 
+	// Preflight: validate manifest paths before running any e2e tests.
+	mustRun(t, "Preflight Manifest Validation", preflightManifestValidation)
+
 	// Remove any leftover resources from previous test runs before starting if the cleanup flag is enabled
 	if testOpts.cleanUpPreviousResources {
 		CleanupPreviousTestResources(t)

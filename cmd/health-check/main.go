@@ -1,6 +1,11 @@
 // health-check runs cluster health checks and exits 0 if the cluster is healthy, 1 otherwise.
 // Configuration can be set via flags or environment variables; flags take precedence.
 // Use -help to see options and defaults (env vars are documented there).
+//
+// Subcommands:
+//
+//	health-check                       cluster health (default)
+//	health-check validate manifests    validate manifest paths against build/manifests-config.yaml
 package main
 
 import (
@@ -17,6 +22,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/clusterhealth"
+	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/validate"
 )
 
 const (
@@ -31,6 +37,12 @@ const (
 )
 
 func main() {
+	// Dispatch subcommand before parsing flags for the default cluster health path.
+	if len(os.Args) >= 2 && os.Args[1] == "validate" {
+		runValidateCmd(os.Args[2:])
+		return
+	}
+
 	outputJSON := flag.Bool("json", false, "Output report as JSON")
 	longFormat := flag.Bool("l", false, "Long format: list conditions and details per section (like ls -l)")
 	layerFlag := flag.String("layer", "",
@@ -47,6 +59,14 @@ func main() {
 		fmt.Sprintf("Operator deployment name. Default: Env(%s) or %q", envOperatorDeployment, defaultOperatorDeploy))
 	monitoringNamespace := flag.String("monitoring-namespace", getEnvDefault(envMonitoringNamespace, defaultMonitoringNS),
 		fmt.Sprintf("Monitoring namespace. Default: Env(%s) or %q", envMonitoringNamespace, defaultMonitoringNS))
+
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: health-check [flags]             run cluster health checks\n")
+		fmt.Fprintf(os.Stderr, "       health-check validate manifests  validate manifest paths against manifests-config.yaml\n")
+		fmt.Fprintf(os.Stderr, "\nCluster health flags:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "\nFor validate subcommand help: health-check validate manifests -help\n")
+	}
 
 	flag.Parse()
 
@@ -92,6 +112,53 @@ func main() {
 	}
 
 	if report.Healthy() {
+		os.Exit(0)
+	}
+	os.Exit(1)
+}
+
+// runValidateCmd handles "health-check validate <subcommand>" dispatch.
+func runValidateCmd(args []string) {
+	if len(args) == 0 || args[0] != "manifests" {
+		fmt.Fprintf(os.Stderr, "Usage: health-check validate manifests [-json] [-platform=odh|rhoai]\n")
+		os.Exit(1)
+	}
+
+	fs := flag.NewFlagSet("validate manifests", flag.ExitOnError)
+	outputJSON := fs.Bool("json", false, "Output as JSON")
+	platformFlag := fs.String("platform", "odh", "Platform to validate: odh or rhoai")
+	configPath := fs.String("config", "build/manifests-config.yaml", "Path to manifests-config.yaml")
+	repoRoot := fs.String("repo-root", ".", "Path to operator repo root")
+
+	if err := fs.Parse(args[1:]); err != nil {
+		os.Exit(1)
+	}
+
+	platform := validate.PlatformODH
+	if strings.EqualFold(*platformFlag, "rhoai") {
+		platform = validate.PlatformRHOAI
+	}
+
+	summary, err := validate.ValidateManifests(validate.Config{
+		ConfigPath: *configPath,
+		RepoRoot:   *repoRoot,
+		Platform:   platform,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "health-check validate: %v\n", err)
+		os.Exit(1)
+	}
+
+	if *outputJSON {
+		if err := validate.FormatJSON(os.Stdout, summary); err != nil {
+			fmt.Fprintf(os.Stderr, "health-check validate: json: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		fmt.Print(validate.FormatSummary(summary))
+	}
+
+	if summary.Healthy() {
 		os.Exit(0)
 	}
 	os.Exit(1)
