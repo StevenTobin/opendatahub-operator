@@ -497,6 +497,67 @@ func TestExtractTestLevel(t *testing.T) {
 	}
 }
 
+func TestFindNoRetryFailure(t *testing.T) {
+	tests := []struct {
+		name            string
+		noRetryPrefixes []string
+		failedTests     []types.TestCase
+		expected        string
+	}{
+		{
+			name:            "no failed tests",
+			noRetryPrefixes: []string{"TestOdhOperator/Preflight_Manifest_Validation"},
+			failedTests:     nil,
+			expected:        "",
+		},
+		{
+			name:            "no no-retry prefixes configured",
+			noRetryPrefixes: nil,
+			failedTests:     []types.TestCase{{Name: "TestOdhOperator/Preflight_Manifest_Validation"}},
+			expected:        "",
+		},
+		{
+			name:            "matching failure - exact match",
+			noRetryPrefixes: []string{"TestOdhOperator/Preflight_Manifest_Validation"},
+			failedTests:     []types.TestCase{{Name: "TestOdhOperator/Preflight_Manifest_Validation"}},
+			expected:        "TestOdhOperator/Preflight_Manifest_Validation",
+		},
+		{
+			name:            "matching failure - prefix match",
+			noRetryPrefixes: []string{"TestOdhOperator/Preflight"},
+			failedTests:     []types.TestCase{{Name: "TestOdhOperator/Preflight_Manifest_Validation"}},
+			expected:        "TestOdhOperator/Preflight_Manifest_Validation",
+		},
+		{
+			name:            "non-matching failure",
+			noRetryPrefixes: []string{"TestOdhOperator/Preflight_Manifest_Validation"},
+			failedTests:     []types.TestCase{{Name: "TestOdhOperator/components/dashboard/subtest"}},
+			expected:        "",
+		},
+		{
+			name:            "mixed failures - returns first match",
+			noRetryPrefixes: []string{"TestOdhOperator/Preflight_Manifest_Validation"},
+			failedTests: []types.TestCase{
+				{Name: "TestOdhOperator/components/dashboard/subtest"},
+				{Name: "TestOdhOperator/Preflight_Manifest_Validation"},
+			},
+			expected: "TestOdhOperator/Preflight_Manifest_Validation",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runner := &E2ETestRunner{
+				opts: types.E2ETestOptions{
+					NoRetryPrefixes: tt.noRetryPrefixes,
+				},
+			}
+			result := &types.TestResult{FailedTest: tt.failedTests}
+			require.Equal(t, tt.expected, runner.findNoRetryFailure(result))
+		})
+	}
+}
+
 func TestNotifyPROnFailure(t *testing.T) {
 	tests := []struct {
 		name               string

@@ -18,6 +18,7 @@ func NewE2ECommand(cfg *config.Config) *cobra.Command {
 	var maxRetries int
 	var neverSkip []string
 	var skipAtPrefix []string
+	var noRetry []string
 	var junitOutput string
 	var prOpts types.PROptions
 
@@ -54,6 +55,7 @@ Example: test-retry e2e -- -run TestFoo -v`,
 				WorkingDir:        workingDir,
 				NeverSkipPrefixes: neverSkip,
 				SkipAtPrefixes:    skipAtPrefix,
+				NoRetryPrefixes:   noRetry,
 				PROptions:         prOpts,
 				JUnitOutputPath:   junitOutput,
 			}
@@ -69,6 +71,7 @@ Example: test-retry e2e -- -run TestFoo -v`,
 	cmd.Flags().IntVar(&maxRetries, "max-retries", 3, "Maximum number of retries for failed tests")
 	cmd.Flags().StringSliceVar(&neverSkip, "never-skip", []string{"TestOdhOperator/DSCInitialization_and_DataScienceCluster_management_E2E_Tests", "TestOdhOperator/DataScienceCluster"}, "Test prefixes that should never be skipped (always run, repeatable)")
 	cmd.Flags().StringSliceVar(&skipAtPrefix, "skip-at-prefix", []string{"TestOdhOperator/services/*/", "TestOdhOperator/components/*/", "TestOdhOperator/"}, "Test prefixes where tests should be extracted at prefix + 1 level (repeatable)")
+	cmd.Flags().StringSliceVar(&noRetry, "no-retry-prefix", []string{"TestOdhOperator/Preflight_Manifest_Validation"}, "Test prefixes that abort all retries when they fail (repeatable)")
 	cmd.Flags().StringVar(&junitOutput, "junit-output", "", "Path to JUnit XML output file (optional)")
 
 	// GitHub PR notification flags

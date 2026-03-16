@@ -59,6 +59,13 @@ func (r *E2ETestRunner) Run() error {
 
 	hasFirstRunFailedTests := len(testResult.FailedTest) > 0
 	lastTestResult := testResult
+	skippedRetries := false
+
+	if noRetryTest := r.findNoRetryFailure(testResult); noRetryTest != "" {
+		fmt.Printf("⛔ Test %q failed and is marked as no-retry — skipping all retries\n", noRetryTest)
+		hasFirstRunFailedTests = false
+		skippedRetries = true
+	}
 
 	// Retry tests, skipping the ones that already passed
 	for attempt := 1; attempt <= r.opts.MaxRetries && hasFirstRunFailedTests; attempt++ {
@@ -103,14 +110,18 @@ func (r *E2ETestRunner) Run() error {
 
 	// Final summary
 	if len(lastTestResult.FailedTest) > 0 {
-		fmt.Printf("❌ Final result: %d tests still failing after %d retries\n",
-			len(lastTestResult.FailedTest), r.opts.MaxRetries)
-		// Show which tests are still failing
+		if skippedRetries {
+			fmt.Printf("❌ Final result: %d tests failed (retries skipped due to non-retryable failure)\n",
+				len(lastTestResult.FailedTest))
+		} else {
+			fmt.Printf("❌ Final result: %d tests still failing after %d retries\n",
+				len(lastTestResult.FailedTest), r.opts.MaxRetries)
+		}
 		for _, failedTest := range lastTestResult.FailedTest {
 			fmt.Printf("  - %s\n", failedTest.Name)
 		}
 
-		return fmt.Errorf("%d tests failed after retries", len(lastTestResult.FailedTest))
+		return fmt.Errorf("%d tests failed", len(lastTestResult.FailedTest))
 	}
 
 	if hasFirstRunFailedTests {
@@ -203,6 +214,19 @@ func isExitError(err error) bool {
 		}
 	}
 	return false
+}
+
+// findNoRetryFailure returns the name of the first failed test that matches
+// a no-retry prefix, or "" if none match.
+func (r *E2ETestRunner) findNoRetryFailure(result *types.TestResult) string {
+	for _, failed := range result.FailedTest {
+		for _, prefix := range r.opts.NoRetryPrefixes {
+			if strings.HasPrefix(failed.Name, prefix) || failed.Name == prefix {
+				return failed.Name
+			}
+		}
+	}
+	return ""
 }
 
 // buildSkipFilter creates a regex pattern to skip all passed tests at their appropriate levels

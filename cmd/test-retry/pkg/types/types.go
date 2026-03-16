@@ -36,7 +36,10 @@ type E2ETestOptions struct {
 	// test prefixes that should never be skipped (always run)
 	NeverSkipPrefixes []string
 	// prefixes where tests should be extracted at prefix + 1 level
-	SkipAtPrefixes  []string
+	SkipAtPrefixes []string
+	// test prefixes that should never be retried; if a matching test fails,
+	// all retries are aborted immediately
+	NoRetryPrefixes []string
 	PROptions       PROptions
 	JUnitOutputPath string // Path to JUnit XML output file (optional)
 }

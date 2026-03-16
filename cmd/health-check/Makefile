@@ -52,3 +52,8 @@ validate-manifests:
 	go run ./cmd/health-check validate manifests
 validate-manifests-json:
 	go run ./cmd/health-check validate manifests -json
+
+# CI target: fetch manifests then validate paths in one step.
+# Suitable for a standalone pre-submit CI job that doesn't need a cluster.
+.PHONY: validate-manifests-ci
+validate-manifests-ci: get-manifests validate-manifests
