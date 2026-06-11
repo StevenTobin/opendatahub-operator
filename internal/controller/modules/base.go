@@ -12,10 +12,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
+	"github.com/opendatahub-io/opendatahub-operator/v2/api/common"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster/gvk"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/controller/types"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/manifests/kustomize"
@@ -64,8 +66,14 @@ type ModuleConfig struct {
 	// ContextDir is an optional subdirectory within ManifestDir.
 	ContextDir string
 
-	// SourcePath is an optional overlay path within ContextDir.
+	// SourcePath is an optional static overlay path within ContextDir.
+	// For platform-specific overlays, use SourcePathFn instead.
 	SourcePath string
+
+	// SourcePathFn returns the overlay path for the current platform at
+	// render time. Takes precedence over SourcePath when set. Use
+	// PlatformOverlay or ConventionalOverlay helpers for common patterns.
+	SourcePathFn func(common.Release) string
 
 	// Namespace overrides the default ApplicationsNamespace for Kustomize
 	// rendering. When empty, Kustomize uses ApplicationsNamespace. Set this
@@ -73,6 +81,12 @@ type ModuleConfig struct {
 	// use NamespaceValueKey or Values instead; this field is not wired into
 	// Helm rendering.
 	Namespace string
+
+	// DeploymentName overrides the expected Deployment name for env injection.
+	// When empty, the framework falls back to the Helm ReleaseName (for Helm
+	// modules) or the module Name (for Kustomize modules). Set this only when
+	// the actual Deployment name differs from these defaults.
+	DeploymentName string
 
 	// ContainerName is the name of the primary operator container in the
 	// module's Deployment. Defaults to "manager" (the kubebuilder convention).
@@ -93,6 +107,19 @@ type ModuleConfig struct {
 	// and injects them into the module operator's Deployment before apply.
 	// Variables whose values are empty on the platform operator are skipped.
 	RelatedImages []string
+
+	// IsEnabledFn returns whether the module should be deployed for the given
+	// platform context. When set, BaseHandler.IsEnabled uses this instead of
+	// requiring an override. Receives the full PlatformContext so both
+	// component modules (DSC) and service modules (DSCI) can be handled.
+	IsEnabledFn func(platform *PlatformContext) bool
+
+	// SpecAccessor extracts the module-specific spec from the platform
+	// context. When set, BaseHandler.BuildModuleCR uses it to construct the
+	// module CR automatically via runtime.DefaultUnstructuredConverter.
+	// Handlers with complex CR construction (e.g. auth field projection)
+	// can still override BuildModuleCR.
+	SpecAccessor func(platform *PlatformContext) any
 }
 
 // BaseHandler provides default implementations for ModuleHandler methods
@@ -100,6 +127,10 @@ type ModuleConfig struct {
 // override IsEnabled and BuildModuleCR.
 type BaseHandler struct {
 	Config ModuleConfig
+}
+
+func (b *BaseHandler) GetConfig() *ModuleConfig {
+	return &b.Config
 }
 
 func (b *BaseHandler) GetName() string {
@@ -110,19 +141,196 @@ func (b *BaseHandler) GetGVK() schema.GroupVersionKind {
 	return b.Config.GVK
 }
 
-func (b *BaseHandler) GetContainerName() string {
-	if b.Config.ContainerName != "" {
-		return b.Config.ContainerName
+// IsEnabled returns whether the module should be deployed. When
+// Config.IsEnabledFn is set, it delegates to the callback. Otherwise
+// it returns false — handlers without a callback must override this method.
+func (b *BaseHandler) IsEnabled(platform *PlatformContext) bool {
+	if b.Config.IsEnabledFn != nil {
+		return b.Config.IsEnabledFn(platform)
 	}
-	return "manager"
+	return false
 }
 
-func (b *BaseHandler) GetControllerImage() string {
-	return b.Config.ControllerImage
+// BuildModuleCR constructs the module CR from the platform context. When
+// Config.SpecAccessor is set, it converts the returned spec to unstructured
+// and sets the GVK and CR name automatically. Handlers with complex CR
+// construction should override this method.
+func (b *BaseHandler) BuildModuleCR(
+	_ context.Context,
+	_ client.Client,
+	platform *PlatformContext,
+) (*unstructured.Unstructured, error) {
+	if b.Config.SpecAccessor == nil {
+		return nil, fmt.Errorf("module %s: BuildModuleCR not implemented and no SpecAccessor configured", b.Config.Name)
+	}
+
+	if platform == nil {
+		return nil, fmt.Errorf("module %s: platform context is nil", b.Config.Name)
+	}
+
+	specObj := b.Config.SpecAccessor(platform)
+	if specObj == nil {
+		return nil, fmt.Errorf("module %s: SpecAccessor returned nil", b.Config.Name)
+	}
+
+	spec, err := runtime.DefaultUnstructuredConverter.ToUnstructured(specObj)
+	if err != nil {
+		return nil, fmt.Errorf("module %s: converting spec to unstructured: %w", b.Config.Name, err)
+	}
+
+	u := &unstructured.Unstructured{
+		Object: map[string]any{
+			"spec": spec,
+		},
+	}
+	u.SetGroupVersionKind(b.Config.GVK)
+	u.SetName(b.Config.CRName)
+
+	return u, nil
 }
 
-func (b *BaseHandler) GetRelatedImages() []string {
-	return b.Config.RelatedImages
+// resolveGVK discovers the module's GVK from its CRD manifest when
+// Config.GVK is not explicitly set. It renders the module's chart or
+// overlay, scans for CustomResourceDefinition resources, and extracts
+// group/version/kind from the CRD spec.
+func (b *BaseHandler) resolveGVK(chartsBasePath, manifestsBasePath string) error {
+	if b.Config.GVK != (schema.GroupVersionKind{}) {
+		return nil
+	}
+
+	resources, err := b.renderManifests(chartsBasePath, manifestsBasePath)
+	if err != nil {
+		return fmt.Errorf("rendering manifests for GVK discovery in module %s: %w", b.Config.Name, err)
+	}
+
+	found := make([]schema.GroupVersionKind, 0, 1)
+	for _, res := range resources {
+		if res.GroupVersionKind() != gvk.CustomResourceDefinition {
+			continue
+		}
+		extracted, err := ExtractGVKFromCRD(&res)
+		if err != nil {
+			return fmt.Errorf("extracting GVK from CRD in module %s: %w", b.Config.Name, err)
+		}
+		found = append(found, extracted)
+	}
+
+	switch len(found) {
+	case 0:
+		return fmt.Errorf("module %s: no CustomResourceDefinition found in rendered manifests", b.Config.Name)
+	case 1:
+		b.Config.GVK = found[0]
+		return nil
+	default:
+		return fmt.Errorf("module %s: expected exactly 1 CRD, found %d", b.Config.Name, len(found))
+	}
+}
+
+// renderManifests renders the module's Helm chart and/or Kustomize overlay
+// without a PlatformContext, used for GVK discovery at startup.
+func (b *BaseHandler) renderManifests(chartsBasePath, manifestsBasePath string) ([]unstructured.Unstructured, error) {
+	var result []unstructured.Unstructured
+
+	if b.Config.ChartDir != "" {
+		chartPath := filepath.Join(chartsBasePath, b.Config.ChartDir)
+		renderer, err := helm.New([]helm.Source{{Chart: chartPath, ReleaseName: b.Config.ReleaseName}})
+		if err != nil {
+			return nil, fmt.Errorf("creating helm renderer: %w", err)
+		}
+		resources, err := renderer.Process(context.Background(), nil)
+		if err != nil {
+			return nil, fmt.Errorf("rendering chart %s: %w", chartPath, err)
+		}
+		result = append(result, resources...)
+	}
+
+	if b.Config.ManifestDir != "" {
+		manifestPath := b.Config.ManifestDir
+		if manifestsBasePath != "" {
+			manifestPath = filepath.Join(manifestsBasePath, manifestPath)
+		}
+		if b.Config.ContextDir != "" {
+			manifestPath = filepath.Join(manifestPath, b.Config.ContextDir)
+		}
+		if b.Config.SourcePath != "" {
+			manifestPath = filepath.Join(manifestPath, b.Config.SourcePath)
+		}
+
+		ke := kustomize.NewEngine()
+		resources, err := ke.Render(manifestPath)
+		if err != nil {
+			return nil, fmt.Errorf("rendering kustomize %s: %w", manifestPath, err)
+		}
+		result = append(result, resources...)
+	}
+
+	return result, nil
+}
+
+// ExtractGVKFromCRD extracts the GroupVersionKind from a CustomResourceDefinition's
+// spec. It reads spec.group, spec.names.kind, and selects the storage version
+// (falling back to the first served version).
+func ExtractGVKFromCRD(crd *unstructured.Unstructured) (schema.GroupVersionKind, error) {
+	group, _, err := unstructured.NestedString(crd.Object, "spec", "group")
+	if err != nil || group == "" {
+		return schema.GroupVersionKind{}, fmt.Errorf("CRD %s missing spec.group", crd.GetName())
+	}
+
+	kind, _, err := unstructured.NestedString(crd.Object, "spec", "names", "kind")
+	if err != nil || kind == "" {
+		return schema.GroupVersionKind{}, fmt.Errorf("CRD %s missing spec.names.kind", crd.GetName())
+	}
+
+	versions, found, err := unstructured.NestedSlice(crd.Object, "spec", "versions")
+	if err != nil || !found || len(versions) == 0 {
+		return schema.GroupVersionKind{}, fmt.Errorf("CRD %s missing spec.versions", crd.GetName())
+	}
+
+	version := ""
+	for _, v := range versions {
+		vm, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := vm["name"].(string)
+		if name == "" {
+			continue
+		}
+		storage, _ := vm["storage"].(bool)
+		if storage {
+			version = name
+			break
+		}
+		served, _ := vm["served"].(bool)
+		if served && version == "" {
+			version = name
+		}
+	}
+
+	if version == "" {
+		return schema.GroupVersionKind{}, fmt.Errorf("CRD %s has no storage or served version", crd.GetName())
+	}
+
+	return schema.GroupVersionKind{Group: group, Version: version, Kind: kind}, nil
+}
+
+// InitModuleGVKs resolves GVKs for all registered modules that don't have
+// an explicit GVK set. Must be called before Build and registerModuleCROwnedTypes.
+func InitModuleGVKs(chartsBasePath, manifestsBasePath string) error {
+	reg := DefaultRegistry()
+	if !reg.HasEntries() {
+		return nil
+	}
+
+	return reg.ForAll(func(h ModuleHandler, _ bool) error {
+		type gvkResolver interface {
+			resolveGVK(chartsBasePath, manifestsBasePath string) error
+		}
+		if r, ok := h.(gvkResolver); ok {
+			return r.resolveGVK(chartsBasePath, manifestsBasePath)
+		}
+		return nil
+	})
 }
 
 func (b *BaseHandler) GetOperatorManifests(platform *PlatformContext) OperatorManifests {
@@ -148,10 +356,20 @@ func (b *BaseHandler) GetOperatorManifests(platform *PlatformContext) OperatorMa
 	}
 
 	if b.Config.ManifestDir != "" {
+		manifestPath := b.Config.ManifestDir
+		if platform != nil && platform.ManifestsBasePath != "" {
+			manifestPath = filepath.Join(platform.ManifestsBasePath, manifestPath)
+		}
+
+		sourcePath := b.Config.SourcePath
+		if b.Config.SourcePathFn != nil && platform != nil {
+			sourcePath = b.Config.SourcePathFn(platform.Release)
+		}
+
 		result.Manifests = []types.ManifestInfo{{
-			Path:       b.Config.ManifestDir,
+			Path:       manifestPath,
 			ContextDir: b.Config.ContextDir,
-			SourcePath: b.Config.SourcePath,
+			SourcePath: sourcePath,
 			Namespace:  b.Config.Namespace,
 		}}
 	}
@@ -314,6 +532,29 @@ func (b *BaseHandler) deleteRenderedResources(
 	}
 
 	return nil
+}
+
+// PlatformOverlay returns a SourcePathFn that maps platform names to overlay
+// paths. Use for modules with different Kustomize overlays per platform.
+func PlatformOverlay(m map[common.Platform]string) func(common.Release) string {
+	return func(r common.Release) string {
+		if sp, ok := m[r.Name]; ok {
+			return sp
+		}
+		return ""
+	}
+}
+
+// ConventionalOverlay returns a SourcePathFn that resolves the overlay path
+// as "overlays/<platformName>". Use when the module's manifest directory
+// follows the convention of naming overlay subdirectories after platforms.
+func ConventionalOverlay() func(common.Release) string {
+	return func(r common.Release) string {
+		if r.Name == "" {
+			return ""
+		}
+		return filepath.Join("overlays", string(r.Name))
+	}
 }
 
 // ParseConditions extracts []metav1.Condition from an unstructured object's

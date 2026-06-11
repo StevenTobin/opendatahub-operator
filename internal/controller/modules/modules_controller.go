@@ -59,11 +59,34 @@ func commonActions() []actions.Fn {
 //     PlatformContext.DSC and .DSCI are nil; only modules whose
 //     ManagementState is Managed in spec.modules are enabled.
 func NewModuleReconciler(ctx context.Context, mgr ctrl.Manager) error {
+	chartsBase, manifestsBase := extractBasePaths(mgr)
+	if err := InitModuleGVKs(chartsBase, manifestsBase); err != nil {
+		return fmt.Errorf("resolving module GVKs: %w", err)
+	}
+
 	if flags.IsDSCEnabled() && flags.IsDSCIEnabled() {
 		return newDSCModuleReconciler(ctx, mgr)
 	}
 
 	return newPlatformModuleReconciler(ctx, mgr)
+}
+
+func extractBasePaths(mgr ctrl.Manager) (string, string) {
+	type chartsBasePathProvider interface {
+		GetChartsBasePath() string
+	}
+	type manifestsBasePathProvider interface {
+		GetManifestsBasePath() string
+	}
+
+	var charts, manifests string
+	if p, ok := mgr.(chartsBasePathProvider); ok {
+		charts = p.GetChartsBasePath()
+	}
+	if p, ok := mgr.(manifestsBasePathProvider); ok {
+		manifests = p.GetManifestsBasePath()
+	}
+	return charts, manifests
 }
 
 // newDSCModuleReconciler creates the module controller in DSC mode.

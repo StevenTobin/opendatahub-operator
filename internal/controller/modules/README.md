@@ -102,11 +102,17 @@ ConfigMap. They must **not** contain a CR instance; the platform creates the CR.
 
 ### 2. Handler implementation (`internal/controller/modules/<name>/handler.go`)
 
-Embed `BaseHandler` and implement only `IsEnabled` and `BuildModuleCR`.
-Set **either** `ChartDir` (Helm) or `ManifestDir` (Kustomize) in `ModuleConfig`
-to select the manifest format.
+Embed `BaseHandler` and populate `ModuleConfig`. Set **either** `ChartDir`
+(Helm) or `ManifestDir` (Kustomize) to select the manifest format.
 
-**Helm example:**
+For simple modules, `IsEnabled` and `BuildModuleCR` can be provided as
+callbacks on `ModuleConfig` (`IsEnabledFn`, `SpecAccessor`). Modules with
+complex CR construction can override `BuildModuleCR` as a method instead.
+
+The `GVK` field is optional -- when omitted, the framework infers it at
+startup by rendering the module's manifests and finding the CRD.
+
+**Helm example (minimal):**
 
 ```go
 func NewHandler() *handler {
@@ -117,10 +123,13 @@ func NewHandler() *handler {
                 CRName:      "default",
                 ChartDir:    "mymodule",
                 ReleaseName: "mymodule-operator",
-                GVK: schema.GroupVersionKind{
-                    Group:   "components.platform.opendatahub.io",
-                    Version: "v1alpha1",
-                    Kind:    "MyModule",
+                // GVK is inferred from the CRD in the chart.
+                IsEnabledFn: func(p *modules.PlatformContext) bool {
+                    return p != nil && p.DSC != nil &&
+                        p.DSC.Spec.Components.MyModule.ManagementState == operatorv1.Managed
+                },
+                SpecAccessor: func(p *modules.PlatformContext) any {
+                    return &p.DSC.Spec.Components.MyModule
                 },
             },
         },
@@ -128,7 +137,7 @@ func NewHandler() *handler {
 }
 ```
 
-**Kustomize example:**
+**Kustomize example with platform-specific overlays:**
 
 ```go
 func NewHandler() *handler {
@@ -139,11 +148,15 @@ func NewHandler() *handler {
                 CRName:      "default",
                 ManifestDir: "mymodule",
                 ContextDir:  "operator",
-                SourcePath:  "overlays/production",
-                GVK: schema.GroupVersionKind{
-                    Group:   "components.platform.opendatahub.io",
-                    Version: "v1alpha1",
-                    Kind:    "MyModule",
+                // Resolves to overlays/<platformName> at render time
+                SourcePathFn: modules.ConventionalOverlay(),
+                // ManifestsBasePath is prepended automatically.
+                IsEnabledFn: func(p *modules.PlatformContext) bool {
+                    return p != nil && p.DSC != nil &&
+                        p.DSC.Spec.Components.MyModule.ManagementState == operatorv1.Managed
+                },
+                SpecAccessor: func(p *modules.PlatformContext) any {
+                    return &p.DSC.Spec.Components.MyModule
                 },
             },
         },
@@ -151,20 +164,35 @@ func NewHandler() *handler {
 }
 ```
 
-Both variants still require `IsEnabled` and `BuildModuleCR`. `BuildModuleCR`
-receives a `*PlatformContext` containing all platform-level fields -- see the
-[Developer Guide](../../../docs/modular/Module%20Handler%20Developer%20Guide.md)
-for the full handler code.
+**Kustomize with explicit platform overlay map:**
 
-`BaseHandler` provides default implementations for the remaining four
-interface methods:
+```go
+SourcePathFn: modules.PlatformOverlay(map[common.Platform]string{
+    cluster.OpenDataHub:      "overlays/odh",
+    cluster.SelfManagedRhoai: "overlays/rhoai",
+}),
+```
+
+`BaseHandler` provides default implementations for all interface methods:
 
 | Method | Default behaviour |
 |---|---|
 | `GetName()` | Returns `Config.Name` |
-| `GetGVK()` | Returns `Config.GVK` |
-| `GetOperatorManifests()` | Returns `OperatorManifests` with `HelmCharts` (if `ChartDir` set) and/or `Manifests` (if `ManifestDir` set) |
+| `GetConfig()` | Returns `&Config` |
+| `GetGVK()` | Returns `Config.GVK` (inferred from CRD if not set) |
+| `IsEnabled()` | Delegates to `Config.IsEnabledFn`; returns false if nil |
+| `BuildModuleCR()` | Delegates to `Config.SpecAccessor` + unstructured conversion; error if nil |
+| `GetOperatorManifests()` | Returns `OperatorManifests` with `HelmCharts` (if `ChartDir` set) and/or `Manifests` (if `ManifestDir` set). Prepends `ManifestsBasePath` for Kustomize, resolves `SourcePathFn` if set. |
 | `GetModuleStatus()` | GETs the module CR by `Config.GVK` + `Config.CRName`, parses `.status.conditions` and `.status.observedGeneration`, returns a `*ModuleStatus` |
+
+Additional `ModuleConfig` fields for injection:
+
+| Field | Purpose | Default |
+|---|---|---|
+| `DeploymentName` | Override Deployment name for env injection | Helm ReleaseName or module Name |
+| `ContainerName` | Override container name for env injection | `"manager"` |
+| `ControllerImage` | RELATED_IMAGE env var for operator image override | empty (no override) |
+| `RelatedImages` | RELATED_IMAGE env vars to inject into operator | empty |
 
 ### 3. DSC API stanza (`api/datasciencecluster/v2/datasciencecluster_types.go`)
 
@@ -210,9 +238,12 @@ existingModules = map[string]mr.ModuleHandler{
 
 ### `types.go` -- ModuleHandler interface and PlatformContext
 
-The 8-method contract between the platform and each module handler:
+The `ModuleHandler` interface defines the contract between the platform and
+each module handler:
 
 - `GetName()` -- unique identifier (registry key, log messages)
+- `GetConfig()` -- returns `*ModuleConfig` for framework access to injection
+  fields and callbacks
 - `IsEnabled(platform)` -- reads DSC/DSCI to determine enablement
 - `GetGVK()` -- module CR's GroupVersionKind (used for watch and ownership
   registration)
@@ -220,35 +251,37 @@ The 8-method contract between the platform and each module handler:
   charts and/or Kustomize manifests for the module operator
 - `BuildModuleCR(ctx, cli, platform)` -- constructs the module CR with
   platform fields projected from `*PlatformContext`
-- `GetRelatedImages()` -- returns `RELATED_IMAGE_*` env var names
 - `GetModuleStatus(ctx, cli)` -- returns `*ModuleStatus` with conditions and
   generation metadata for staleness detection
-- `ModuleCRExists(ctx, cli)` -- checks if the module CR exists on the cluster
-  (returns false when the CRD is absent)
-- `DeleteOperatorResources(ctx, cli, platform)` -- renders the module's Helm
-  chart and deletes each resource from the cluster (for two-phase cleanup)
+- `GetModuleCRState(ctx, cli)` -- returns the lifecycle state of the module CR
+- `DeleteModuleCR(ctx, cli)` -- deletes the module CR (idempotent)
+- `DeleteOperatorResources(ctx, cli, platform)` -- renders the module's
+  manifests and deletes each resource from the cluster (for two-phase cleanup)
 
 `OwnedTypeRegistrar` is a single-method interface (`AddOwnedType(gvk)`) used
 by `registerModuleCROwnedTypes` to register module CR GVKs as statically
 owned types on the reconciler.
 
-`PlatformContext` is built once per reconcile in `provisionModules` and passed
-to every handler's `BuildModuleCR`. It exposes:
+`PlatformContext` is built once per reconcile and passed to every handler. It
+exposes:
 
 | Field | Source | Description |
 |---|---|---|
 | `ApplicationsNamespace` | `DSCI.Spec.ApplicationsNamespace` | Namespace where module operands deploy |
-| `GatewayDomain` | `GatewayConfig.Status.Domain` | Cluster ingress domain (empty if not yet provisioned) |
 | `Release` | `rr.Release` | Platform identity (ODH/RHOAI) and version |
 | `DSC` | reconcile instance | The `DataScienceCluster` instance for reading module-specific component stanzas |
+| `DSCI` | reconcile instance | The `DSCInitialization` instance for service module stanzas |
+| `Platform` | reconcile instance | The `Platform` CR for xKS mode |
+| `ChartsBasePath` | `rr.ChartsBasePath` | Base directory for Helm charts |
+| `ManifestsBasePath` | `rr.ManifestsBasePath` | Base directory for Kustomize manifests |
 
 ### `base.go` -- BaseHandler and ModuleConfig
 
-`ModuleConfig` holds static metadata (name, GVK, manifest info). Set `ChartDir`
-for Helm or `ManifestDir` for Kustomize (or both). `BaseHandler` provides
-default implementations for `GetName`, `GetGVK`, `GetOperatorManifests`, and
-`GetModuleStatus`. Module teams embed `BaseHandler` and only implement
-`IsEnabled` and `BuildModuleCR`.
+`ModuleConfig` holds declarative metadata (name, GVK, manifest info, injection
+fields, and optional callbacks). Set `ChartDir` for Helm or `ManifestDir` for
+Kustomize (or both). `BaseHandler` provides default implementations for all
+`ModuleHandler` methods, driven by `ModuleConfig`. Module teams embed
+`BaseHandler` and typically only need to populate `ModuleConfig` fields.
 
 `ModuleStatus` bundles parsed conditions with generation metadata
 (`ObservedGeneration`, `Generation`) for staleness detection.

@@ -103,6 +103,7 @@ func buildPlatformContext(ctx context.Context, rr *odhtype.ReconciliationRequest
 		DSCI:                  dsciOrNil(rr),
 		Platform:              platformFromInstance(rr),
 		ChartsBasePath:        rr.ChartsBasePath,
+		ManifestsBasePath:     rr.ManifestsBasePath,
 	}, nil
 }
 
@@ -225,12 +226,7 @@ func provisionModules(ctx context.Context, rr *odhtype.ReconciliationRequest) er
 			return
 		}
 
-		perModuleImages = append(perModuleImages, odhtype.ModuleImages{
-			DeploymentName:  deploymentNameFromManifests(operatorManifests, handler.GetName()),
-			ContainerName:   containerNameFor(handler),
-			ControllerImage: controllerImageFor(handler),
-			Images:          handler.GetRelatedImages(),
-		})
+		perModuleImages = append(perModuleImages, ModuleImagesFromConfig(handler.GetConfig(), operatorManifests))
 		if len(operatorManifests.HelmCharts) > 0 {
 			rr.HelmCharts = append(rr.HelmCharts, operatorManifests.HelmCharts...)
 		}
@@ -264,30 +260,35 @@ func provisionModules(ctx context.Context, rr *odhtype.ReconciliationRequest) er
 
 const defaultContainerName = "manager"
 
-func containerNameFor(h ModuleHandler) string {
-	if cn, ok := h.(ContainerNamer); ok {
-		return cn.GetContainerName()
+// ModuleImagesFromConfig derives a ModuleImages struct from a module's
+// configuration and its operator manifests. This is the single point where
+// injection metadata is assembled, so adding a new injection knob only
+// requires adding a field to ModuleConfig.
+func ModuleImagesFromConfig(cfg *ModuleConfig, manifests OperatorManifests) odhtype.ModuleImages {
+	containerName := cfg.ContainerName
+	if containerName == "" {
+		containerName = defaultContainerName
 	}
-	return defaultContainerName
-}
 
-func controllerImageFor(h ModuleHandler) string {
-	if ci, ok := h.(ControllerImager); ok {
-		return ci.GetControllerImage()
-	}
-	return ""
-}
-
-// deploymentNameFromManifests returns the expected Deployment name for a module
-// based on its manifests. For Helm-based modules this is the release name; for
-// Kustomize modules it falls back to the provided fallbackName.
-func deploymentNameFromManifests(manifests OperatorManifests, fallbackName string) string {
-	for _, chart := range manifests.HelmCharts {
-		if chart.ReleaseName != "" {
-			return chart.ReleaseName
+	deploymentName := cfg.DeploymentName
+	if deploymentName == "" {
+		for _, chart := range manifests.HelmCharts {
+			if chart.ReleaseName != "" {
+				deploymentName = chart.ReleaseName
+				break
+			}
 		}
 	}
-	return fallbackName
+	if deploymentName == "" {
+		deploymentName = cfg.Name
+	}
+
+	return odhtype.ModuleImages{
+		DeploymentName:  deploymentName,
+		ContainerName:   containerName,
+		ControllerImage: cfg.ControllerImage,
+		Images:          cfg.RelatedImages,
+	}
 }
 
 // updateModuleStatus reads status conditions from each enabled module's CR

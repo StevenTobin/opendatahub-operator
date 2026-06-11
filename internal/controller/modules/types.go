@@ -38,6 +38,12 @@ type ModuleHandler interface {
 	// GetName returns the unique identifier for this module.
 	GetName() string
 
+	// GetConfig returns the module's declarative configuration. The framework
+	// reads injection fields (ContainerName, ControllerImage, DeploymentName,
+	// RelatedImages) directly from the config rather than via optional
+	// interfaces.
+	GetConfig() *ModuleConfig
+
 	// IsEnabled returns whether the module should be deployed based on platform
 	// configuration. Component modules check platform.DSC; service modules
 	// check platform.DSCI.
@@ -65,10 +71,6 @@ type ModuleHandler interface {
 	// field mapping.
 	BuildModuleCR(ctx context.Context, cli client.Client, platform *PlatformContext) (*unstructured.Unstructured, error)
 
-	// GetRelatedImages returns the RELATED_IMAGE_* environment variable names
-	// that the module operator needs injected into its Deployment.
-	GetRelatedImages() []string
-
 	// GetModuleStatus reads the current status from the deployed module CR
 	// for aggregation into the DSC ModulesReady condition. The returned
 	// ModuleStatus includes conditions and generation metadata for staleness
@@ -89,23 +91,6 @@ type ModuleHandler interface {
 	// deletes each resource from the cluster. Used by the two-phase cleanup
 	// action after the module CR has been confirmed deleted.
 	DeleteOperatorResources(ctx context.Context, cli client.Client, platform *PlatformContext) error
-}
-
-// ContainerNamer allows a module handler to override the default container
-// name ("manager") used for RELATED_IMAGE_* and controller image injection.
-// All handlers embedding BaseHandler satisfy this interface automatically;
-// the override is only active when ModuleConfig.ContainerName is set.
-type ContainerNamer interface {
-	GetContainerName() string
-}
-
-// ControllerImager allows a module handler to declare a RELATED_IMAGE_* env
-// var whose value replaces the operator container's image in the rendered
-// Deployment. All handlers embedding BaseHandler satisfy this interface
-// automatically; the override is only active when ModuleConfig.ControllerImage
-// is set.
-type ControllerImager interface {
-	GetControllerImage() string
 }
 
 // ModuleStatus holds the parsed status from a module CR. It includes the
@@ -161,6 +146,11 @@ type PlatformContext struct {
 
 	// ChartsBasePath is the base directory for locally-bundled Helm charts.
 	ChartsBasePath string
+
+	// ManifestsBasePath is the base directory for locally-bundled Kustomize
+	// manifests (e.g. /opt/manifests). GetOperatorManifests prepends this
+	// to ManifestDir automatically, matching the Helm ChartsBasePath pattern.
+	ManifestsBasePath string
 }
 
 // RegistrationOption configures optional orchestration metadata when adding

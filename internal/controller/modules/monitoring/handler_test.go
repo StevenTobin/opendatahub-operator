@@ -241,9 +241,8 @@ func TestBuildModuleCR_PlatformMode(t *testing.T) {
 func TestGetRelatedImages(t *testing.T) {
 	g := NewWithT(t)
 	h := monitoring.NewHandler()
-	images := h.GetRelatedImages()
 
-	g.Expect(images).Should(ConsistOf(
+	g.Expect(h.GetConfig().RelatedImages).Should(ConsistOf(
 		"RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE",
 		"RELATED_IMAGE_OSE_PROM_LABEL_PROXY_IMAGE",
 		"RELATED_IMAGE_CLI_IMAGE",

@@ -19,7 +19,8 @@ const applicationsNamespaceEnv = "APPLICATIONS_NAMESPACE"
 // and before deploy. It mutates Deployment resources in rr.Resources to inject
 // RELATED_IMAGE_* and APPLICATIONS_NAMESPACE environment variables into the
 // target container of each module operator Deployment. The target container name
-// defaults to "manager" and can be overridden per module via ContainerNamer. If
+// defaults to "manager" and can be overridden per module via
+// ModuleConfig.ContainerName. If
 // the target container is not found, injection is skipped with an error log.
 //
 // Related images are scoped per module: each module's images are only injected
