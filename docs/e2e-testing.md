@@ -38,10 +38,11 @@ For OpenShift tests additionally:
 The E2E test suite is organized into test groups that run sequentially. Within each group,
 component tests run in parallel. The suite supports two main targets:
 
-- **`make e2e-test-xks`** — KServe and gateway service tests on KinD / vanilla Kubernetes.
+- **`make e2e-test-xks`** — KServe and gateway tests on KinD / vanilla Kubernetes.
   This is the CI-equivalent E2E for KinD (see `.github/workflows/test-kind-odh-e2e.yaml`).
-  Covers KServe module lifecycle, gateway infrastructure (GatewayConfig, kube-auth-proxy,
-  EnvoyFilter), and xKS DAG runlevel gating.
+  It covers KServe component and platform-orchestration behavior (module lifecycle, CR lifecycle,
+  spec projection, status propagation, and resilience), gateway infrastructure (GatewayConfig,
+  kube-auth-proxy, EnvoyFilter), and xKS DAG runlevel gating.
 
 - **`make e2e-test`** — Full suite across all components, DSC/DSCI lifecycle,
   services, webhooks, and operator resilience. Requires an OpenShift cluster.
@@ -463,6 +464,8 @@ done
 | `KIND_CONFIG_PATH` | `config/kind/kind-config.yaml` | KinD cluster config |
 | `PULL_SECRET` | *(required)* | Path to container registry auth config |
 | `E2E_TEST_COMPONENT` | *(all)* | Single component to test (e.g., `kserve`) |
+| `E2E_TEST_PLATFORM_ORCHESTRATION` | `true` | Enable/disable platform orchestration contract tests |
+| `E2E_TEST_PLATFORM_COMPONENT` | *(all)* | Filter platform orchestration tests to specific components (e.g., `dashboard,kserve`) |
 | `E2E_TEST_SERVICES` | `true` | Enable/disable service tests |
 | `E2E_TEST_WEBHOOK` | `true` | Enable/disable the existing monitoring admission-webhook tests when the monitoring service suite runs. |
 | `E2E_TEST_CONVERSION_WEBHOOK` | auto | Conversion webhook scenarios run in full OpenShift `All`/`Tier3` suites. Set `true` to include them in a targeted run or `false` to disable them. DSC scenarios delete `default-dsc`; enable DSCI/DSC backup and restore for non-disposable clusters. |
@@ -476,7 +479,7 @@ done
 | `E2E_TEST_DEPENDANT_OPERATORS_MANAGEMENT` | `true` | Enable/disable dependent operator management |
 | `E2E_TEST_OPERATOR_CONTROLLER` | `true` | Enable/disable operator controller tests |
 | `E2E_TEST_OPERATOR_V2TOV3UPGRADE` | `true` | Enable/disable v2-to-v3 upgrade tests |
-| `E2E_TEST_COMPONENTS` | `true` | Enable/disable component tests |
+| `E2E_TEST_COMPONENTS` | `false` | *(Deprecated)* Enable per-component tests (superseded by platform orchestration) |
 | `E2E_TEST_DELETION_POLICY` | `always` | Deletion policy for test resources (`never`, `always`, `on-failure`) |
 | `E2E_AUTO_RESOLVE` | `false` | When `true`, derive `E2E_TEST_COMPONENT`/`E2E_TEST_SERVICE` automatically from changed files instead of running the full suite. See [Path-based test scoping](#path-based-test-scoping). |
 
