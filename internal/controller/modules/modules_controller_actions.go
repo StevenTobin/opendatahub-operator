@@ -14,6 +14,7 @@ import (
 	configv1alpha1 "github.com/opendatahub-io/opendatahub-operator/v2/api/config/v1alpha1"
 	dscv2 "github.com/opendatahub-io/opendatahub-operator/v2/api/datasciencecluster/v2"
 	dsciv2 "github.com/opendatahub-io/opendatahub-operator/v2/api/dscinitialization/v2"
+	cr "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/components/registry"
 	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/status"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster"
 	odhtype "github.com/opendatahub-io/opendatahub-operator/v2/pkg/controller/types"
@@ -317,19 +318,15 @@ func deploymentNameFromManifests(manifests OperatorManifests, fallbackName strin
 	return fallbackName
 }
 
-// updateModuleStatus reads status conditions from each enabled module's CR
-// and maps them to the DSC status. Module conditions contribute to the
-// aggregate ModulesReady condition.
+// ComputeModulesStatus reads status conditions from each enabled module's CR
+// and sets the aggregate ModulesReady condition on rr.Conditions.
 //
-// During the transition period where both component and module controllers
-// write to DSC status, ModulesReady is not set because the DSC CRD uses
-// +listType=atomic on status.conditions. With atomic lists, SSA replaces
-// the entire list on each write, so two controllers race and the last
-// writer's conditions overwrite the other's. Once all components have
-// migrated to modules and the DSC controller is removed, the modules
-// controller becomes the sole status writer and ModulesReady can be
-// enabled.
-func updateModuleStatus(ctx context.Context, rr *odhtype.ReconciliationRequest) error {
+// This function is called from both the modules controller (for the future
+// when it becomes the sole status writer) and the DSC controller (so its
+// condition cleanup does not strip ModulesReady). Once all components have
+// migrated to modules and the DSC controller is removed, only the modules
+// controller call will remain.
+func ComputeModulesStatus(ctx context.Context, rr *odhtype.ReconciliationRequest) error {
 	log := logf.FromContext(ctx)
 
 	reg := DefaultRegistry()
@@ -429,4 +426,16 @@ func updateModuleStatus(ctx context.Context, rr *odhtype.ReconciliationRequest) 
 	}
 
 	return nil
+}
+
+// updateModuleStatus is the action-chain wrapper around ComputeModulesStatus.
+// While in-tree components exist, the DSC controller handles ModulesReady to
+// prevent its condition cleanup from stripping it. This action only runs
+// when the component registry is empty (all migrated to modules), making
+// the modules controller the sole status writer.
+func updateModuleStatus(ctx context.Context, rr *odhtype.ReconciliationRequest) error {
+	if cr.HasEntries() {
+		return nil
+	}
+	return ComputeModulesStatus(ctx, rr)
 }

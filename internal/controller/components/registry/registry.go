@@ -119,6 +119,10 @@ func ForEach(f func(ch ComponentHandler) error) error {
 	return r.ForEach(f)
 }
 
+func HasEntries() bool {
+	return len(r.entries) > 0
+}
+
 func DefaultRegistry() *Registry {
 	return r
 }

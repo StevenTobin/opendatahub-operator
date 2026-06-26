@@ -11,6 +11,7 @@ import (
 
 	dscv2 "github.com/opendatahub-io/opendatahub-operator/v2/api/datasciencecluster/v2"
 	cr "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/components/registry"
+	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster"
 	odhtype "github.com/opendatahub-io/opendatahub-operator/v2/pkg/controller/types"
 )
@@ -121,9 +122,14 @@ func updateStatus(ctx context.Context, rr *odhtype.ReconciliationRequest) error 
 
 	instance.Status.Release = rr.Release
 
-	err := computeComponentsStatus(ctx, rr, cr.DefaultRegistry())
-	if err != nil {
+	if err := computeComponentsStatus(ctx, rr, cr.DefaultRegistry()); err != nil {
 		return err
+	}
+
+	if modules.DefaultRegistry().HasEntries() {
+		if err := modules.ComputeModulesStatus(ctx, rr); err != nil {
+			return err
+		}
 	}
 
 	return nil
