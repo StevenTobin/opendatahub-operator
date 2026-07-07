@@ -78,7 +78,7 @@ validate_bool E2E_TEST_CONVERSION_WEBHOOK_PLATFORM
 
 # Deprecated: per-component tests are superseded by platform orchestration tests.
 # Remove once modularisation is complete.
-: "${E2E_TEST_COMPONENTS:=false}"
+: "${E2E_TEST_COMPONENTS:=true}"
 validate_bool E2E_TEST_COMPONENTS
 
 : "${E2E_TEST_PLATFORM_ORCHESTRATION:=true}"

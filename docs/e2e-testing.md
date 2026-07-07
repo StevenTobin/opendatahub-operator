@@ -455,6 +455,13 @@ done
 
 ### Environment variables
 
+Build/cluster variables (`IMG`, `IMAGE_BUILDER`, `CLUSTER_NAME`, `PULL_SECRET`, etc.) are
+documented in the Makefile help text — run `make help` for the full list.
+
+E2E test suites are controlled by `E2E_TEST_*` env vars (or equivalent `--test-*` CLI flags).
+Each var enables/disables a test group or filters components. Defaults and descriptions live
+in `tests/e2e/controller_test.go` (`TestMain`). Key vars:
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `IMG` | `quay.io/opendatahub/opendatahub-operator:latest` | Operator image |
@@ -469,8 +476,8 @@ done
 | `E2E_TEST_SERVICES` | `true` | Enable/disable service tests |
 | `E2E_TEST_WEBHOOK` | `true` | Enable/disable the existing monitoring admission-webhook tests when the monitoring service suite runs. |
 | `E2E_TEST_CONVERSION_WEBHOOK` | auto | Conversion webhook scenarios run in full OpenShift `All`/`Tier3` suites. Set `true` to include them in a targeted run or `false` to disable them. DSC scenarios delete `default-dsc`; enable DSCI/DSC backup and restore for non-disposable clusters. |
-| `E2E_TEST_CONVERSION_WEBHOOK_DSC` | `true` | Include DSC conversion scenarios when conversion tests run. Set `false` for Platform-only conversion tests. |
-| `E2E_TEST_CONVERSION_WEBHOOK_PLATFORM` | `true` | Include Platform conversion scenarios when conversion tests run. Set `false` for DSC-only conversion tests. |
+| `E2E_TEST_CONVERSION_WEBHOOK_DSC` | `true` | Include DSC conversion scenarios when conversion tests run. Set `false` for Platform-only tests. |
+| `E2E_TEST_CONVERSION_WEBHOOK_PLATFORM` | `true` | Include Platform conversion scenarios when conversion tests run. Set `false` for DSC-only tests. |
 | `E2E_TEST_TIMEOUT` | `110m` | Timeout for the containerized E2E binary, including conversion webhook scenarios. |
 | `E2E_TEST_DSC_MANAGEMENT` | `true` | Enable/disable DSC lifecycle tests |
 | `E2E_TEST_DSC_VALIDATION` | `true` | Enable/disable DSC validation tests |
