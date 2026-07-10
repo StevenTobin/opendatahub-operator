@@ -25,7 +25,23 @@ func dirExists(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-var allowedKinds = map[string]bool{
+var helmAllowedKinds = map[string]bool{
+	"Deployment":                     true,
+	"Service":                        true,
+	"ServiceAccount":                 true,
+	"ClusterRole":                    true,
+	"ClusterRoleBinding":             true,
+	"Role":                           true,
+	"RoleBinding":                    true,
+	"ConfigMap":                      true,
+	"CustomResourceDefinition":       true,
+	"MutatingWebhookConfiguration":   true,
+	"ValidatingWebhookConfiguration": true,
+	"Issuer":                         true,
+	"Certificate":                    true,
+}
+
+var kustomizeAllowedKinds = map[string]bool{
 	"Deployment":                     true,
 	"Service":                        true,
 	"ServiceAccount":                 true,
@@ -118,7 +134,7 @@ func TestModuleManifestRendering(t *testing.T) {
 					deploymentCount := 0
 					for _, res := range resources {
 						kind := res.GetKind()
-						g.Expect(allowedKinds).Should(HaveKey(kind),
+						g.Expect(helmAllowedKinds).Should(HaveKey(kind),
 							"chart %s contains disallowed resource kind %q (name: %s)",
 							handler.GetName(), kind, res.GetName())
 
@@ -156,7 +172,7 @@ func TestModuleManifestRendering(t *testing.T) {
 					deploymentCount := 0
 					for _, res := range resources {
 						kind := res.GetKind()
-						g.Expect(allowedKinds).Should(HaveKey(kind),
+						g.Expect(kustomizeAllowedKinds).Should(HaveKey(kind),
 							"kustomize %s contains disallowed resource kind %q (name: %s)",
 							handler.GetName(), kind, res.GetName())
 
