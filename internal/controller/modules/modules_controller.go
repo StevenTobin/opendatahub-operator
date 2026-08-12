@@ -51,6 +51,7 @@ func commonActions() []actions.Fn {
 		helmrender.NewAction(),
 		kustomizerender.NewAction(),
 		provision.ExtractUpgradeGates,
+		provision.AutoAcknowledgeUpgradeGates,
 		checkUpgradeGates,
 		injectModuleEnv,
 		injectPlatformConfig,

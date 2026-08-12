@@ -28,6 +28,7 @@ import (
 	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/services/gateway"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster/gvk"
+	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/controller/gates"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/metadata/labels"
 )
 
@@ -58,6 +59,28 @@ const (
 	// HardwareProfileMigrationSkipped event fields.
 	eventReasonHardwareProfileMigrationSkipped = "HardwareProfileMigrationSkipped"
 )
+
+// ManagedComponents lists all component and module names that receive an
+// upgrade gate key when migrating from major version 2.x. Keep in sync
+// with the registrations in cmd/main.go.
+var ManagedComponents = []string{
+	"aigateway",
+	"dashboard",
+	"datasciencepipelines",
+	"feastoperator",
+	"kserve",
+	"kueue",
+	"mcplifecycleoperator",
+	"mlflowoperator",
+	"modelregistry",
+	"ogx",
+	"ray",
+	"sparkoperator",
+	"trainer",
+	"trainingoperator",
+	"trustyai",
+	"workbenches",
+}
 
 var defaultResourceLimits = map[string]string{
 	"maxMemory": "120Gi",
@@ -118,6 +141,14 @@ func CleanupExistingResource(ctx context.Context,
 		multiErr = multierror.Append(multiErr, fmt.Errorf("failed to check GatewayConfig CRD: %w", err))
 	} else if hasGatewayConfig {
 		multiErr = multierror.Append(multiErr, MigrateGatewayConfigIngressMode(ctx, cli))
+	}
+
+	// Create upgrade gate ConfigMap for 2.x → 3.x major-version upgrades (RHOAIENG-82328).
+	// Requires operator namespace to be initialized; skip gracefully when it is not
+	// (e.g. unit tests that do not call cluster.Init).
+	if operatorNS, nsErr := cluster.GetOperatorNamespace(); nsErr == nil {
+		operatorVersion := cluster.GetRelease().Version.String()
+		multiErr = multierror.Append(multiErr, CreateUpgradeGateConfigMap(ctx, cli, operatorNS, operatorVersion, ManagedComponents))
 	}
 
 	return multiErr.ErrorOrNil()
@@ -614,6 +645,47 @@ func MigrateGatewayConfigIngressMode(ctx context.Context, cli client.Client) err
 	}
 
 	l.Info("GatewayConfig migrated to ingressMode=LoadBalancer")
+
+	return nil
+}
+
+func CreateUpgradeGateConfigMap(ctx context.Context, cli client.Client, namespace, operatorVersion string, components []string) error {
+	log := logf.FromContext(ctx)
+
+	deployedVersion, err := cluster.GetDeployedRelease(ctx, cli)
+	if err != nil {
+		return fmt.Errorf("failed to get deployed release version: %w", err)
+	}
+
+	if deployedVersion.Version.Major != 2 {
+		return nil
+	}
+
+	data := make(map[string]string, len(components))
+	for _, comp := range components {
+		key := fmt.Sprintf("ack-%s-%s", operatorVersion, comp)
+		data[key] = fmt.Sprintf("Acknowledge upgrade of %s from version 2.x to %s", comp, operatorVersion)
+	}
+
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      gates.GateConfigMap,
+			Namespace: namespace,
+			Labels: map[string]string{
+				gates.UpgradeGateLabel: "true",
+			},
+		},
+		Data: data,
+	}
+
+	if err := cli.Create(ctx, cm); err != nil {
+		if k8serr.IsAlreadyExists(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to create upgrade gate ConfigMap: %w", err)
+	}
+
+	log.Info("Created upgrade gate ConfigMap", "name", cm.Name, "namespace", namespace, "gates", len(data))
 
 	return nil
 }
