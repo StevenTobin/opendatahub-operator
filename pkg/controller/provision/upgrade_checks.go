@@ -15,15 +15,14 @@ type UpgradeCheckFunc func(ctx context.Context, cli client.Client, component, na
 
 var (
 	upgradeChecksMu sync.RWMutex
-	upgradeChecks   = map[string]UpgradeCheckFunc{}
-)
 
-func init() {
 	// TODO(RHOAIENG-82327): replace with real migration checks
-	RegisterUpgradeCheck("kserve", func(_ context.Context, _ client.Client, _, _ string) error {
-		return nil
-	})
-}
+	upgradeChecks = map[string]UpgradeCheckFunc{
+		"kserve": func(_ context.Context, _ client.Client, _, _ string) error {
+			return fmt.Errorf("kserve upgrade check not yet implemented")
+		},
+	}
+)
 
 // RegisterUpgradeCheck registers a component-specific upgrade check.
 // If a component has no custom check registered, DefaultUpgradeCheck is used.

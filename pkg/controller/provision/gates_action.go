@@ -69,6 +69,13 @@ func ExtractUpgradeGates(ctx context.Context, rr *odhtype.ReconciliationRequest)
 	return nil
 }
 
+// ComponentUpgradeGateAction is an actions.Fn suitable for component
+// controller action chains. It blocks reconciliation when any upgrade
+// gate remains unacknowledged.
+func ComponentUpgradeGateAction(ctx context.Context, rr *odhtype.ReconciliationRequest) error {
+	return CheckUpgradeGates(ctx, rr.Client, rr.Release, rr.Conditions, nil)
+}
+
 // CheckUpgradeGates evaluates admin-acknowledgment gates for the current
 // operator version. It collects gates from all sources (in-tree, labeled
 // cluster ConfigMaps, chart-extracted entries), writes their descriptions
