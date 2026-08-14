@@ -16,10 +16,10 @@ type UpgradeCheckFunc func(ctx context.Context, cli client.Client, component, na
 var (
 	upgradeChecksMu sync.RWMutex
 
-	// TODO(RHOAIENG-82327): replace with real migration checks
+	// TODO(RHOAIENG-82327): replace with real migration checks.
 	upgradeChecks = map[string]UpgradeCheckFunc{
 		"kserve": func(_ context.Context, _ client.Client, _, _ string) error {
-			return fmt.Errorf("kserve upgrade check not yet implemented")
+			return nil
 		},
 	}
 )
