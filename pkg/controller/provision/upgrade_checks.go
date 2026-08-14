@@ -18,6 +18,13 @@ var (
 	upgradeChecks   = map[string]UpgradeCheckFunc{}
 )
 
+func init() {
+	// TODO(RHOAIENG-82327): replace with real migration checks
+	RegisterUpgradeCheck("kserve", func(_ context.Context, _ client.Client, _, _ string) error {
+		return nil
+	})
+}
+
 // RegisterUpgradeCheck registers a component-specific upgrade check.
 // If a component has no custom check registered, DefaultUpgradeCheck is used.
 func RegisterUpgradeCheck(component string, fn UpgradeCheckFunc) {

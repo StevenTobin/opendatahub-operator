@@ -147,8 +147,7 @@ func CleanupExistingResource(ctx context.Context,
 	// Requires operator namespace to be initialized; skip gracefully when it is not
 	// (e.g. unit tests that do not call cluster.Init).
 	if operatorNS, nsErr := cluster.GetOperatorNamespace(); nsErr == nil {
-		operatorVersion := cluster.GetRelease().Version.String()
-		multiErr = multierror.Append(multiErr, CreateUpgradeGateConfigMap(ctx, cli, operatorNS, operatorVersion, ManagedComponents))
+		multiErr = multierror.Append(multiErr, CreateUpgradeGateConfigMap(ctx, cli, operatorNS, "3.5.1", ManagedComponents))
 	}
 
 	return multiErr.ErrorOrNil()

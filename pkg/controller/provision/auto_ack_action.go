@@ -30,16 +30,16 @@ func AutoAcknowledgeUpgradeGates(ctx context.Context, rr *odhtype.Reconciliation
 	}
 
 	appsNS := cluster.GetApplicationNamespace()
-	version := rr.Release.Version.String()
 
 	managed := resolveManagedComponents(rr.Instance)
+
+	version := rr.Release.Version.String()
 
 	return AutoAcknowledgeUpgradeGatesInNamespace(ctx, rr.Client, ns, appsNS, version, managed)
 }
 
-// AutoAcknowledgeUpgradeGatesInNamespace is the namespace-explicit
-// variant, primarily for testing. managedComponents maps component
-// names to true when they are Managed in the DSC. A nil map means
+// managedComponents maps component names to true
+// when they are Managed in the DSC. A nil map means
 // all components require a health check.
 func AutoAcknowledgeUpgradeGatesInNamespace(
 	ctx context.Context, cli client.Client,
@@ -74,11 +74,11 @@ func AutoAcknowledgeUpgradeGatesInNamespace(
 
 	dirty := false
 	for key, component := range unacked {
-		if managedComponents != nil && !managedComponents[component] {
+		if managedComponents == nil || !managedComponents[component] {
 			acksCM.Data[key] = "true"
 			dirty = true
 
-			log.Info("auto-acknowledged upgrade gate (component not managed)",
+			log.Info("auto-acknowledged upgrade gate for unmanaged component",
 				"key", key, "component", component)
 
 			continue
