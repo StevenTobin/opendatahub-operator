@@ -99,17 +99,11 @@ var dagBatches = []componentBatch{
 // from DAG tests because they don't watch their platform config
 // ConfigMap or don't report the platform release, causing the DAG
 // version handshake to stall. Re-enable once fixed:
-//   - aigateway:            RHOAIENG-81918
 //   - dashboard:            RHOAIENG-81919
-//   - mcplifecycleoperator: RHOAIENG-81920
-//   - trainer
-//   - workbenches:          RHOAIENG-81892
+//   - trainer               RHOAIENG-88549
 var dscComponentFieldsWithBrokenVersionHandshake = []string{
-	"aigateway",
 	"dashboard",
-	"mcplifecycleoperator",
 	"trainer",
-	"workbenches",
 }
 
 // dscComponentFields lists the components enabled during DAG tests.
