@@ -133,7 +133,11 @@ func (h *handler) BuildModuleCR(
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert WorkbenchesCommonSpec to unstructured: %w", err)
 	}
-	spec["managementState"] = string(dscCtx.DSC.Spec.Components.Workbenches.ManagementState)
+	managementState := dscCtx.DSC.Spec.Components.Workbenches.ManagementState
+	if managementState == "" {
+		managementState = operatorv1.Removed
+	}
+	spec["managementState"] = string(managementState)
 	spec["mlflowEnabled"] = dscCtx.DSC.Spec.Components.MLflowOperator.ManagementState == operatorv1.Managed
 
 	if cfg != nil {

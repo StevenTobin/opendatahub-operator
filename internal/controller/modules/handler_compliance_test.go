@@ -4,84 +4,20 @@ import (
 	"context"
 	"testing"
 
-	operatorv1 "github.com/openshift/api/operator/v1"
-
 	"github.com/opendatahub-io/opendatahub-operator/v2/api/common"
-	componentApi "github.com/opendatahub-io/opendatahub-operator/v2/api/components/v1alpha1"
 	configv1alpha1 "github.com/opendatahub-io/opendatahub-operator/v2/api/config/v1alpha1"
 	dscv2 "github.com/opendatahub-io/opendatahub-operator/v2/api/datasciencecluster/v2"
+	dsciv2 "github.com/opendatahub-io/opendatahub-operator/v2/api/dscinitialization/v2"
 	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules"
-	aigatewayModule "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules/aigateway"
-	aipipelinesModule "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules/aipipelines"
-	dashboardModule "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules/dashboard"
-	feastModule "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules/feastoperator"
-	kserveModule "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules/kserve"
-	mcplifecycleoperatorModule "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules/mcplifecycleoperator"
-	mlflowoperatorModule "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules/mlflowoperator"
-	ogxModule "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules/ogx"
-	rayModule "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules/ray"
-	workbenchesModule "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules/workbenches"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/utils/test/fakeclient"
 
 	. "github.com/onsi/gomega"
 )
 
-// allHandlers returns every module handler the platform operator registers.
-// Keep in sync with existingModules in cmd/main.go. Monitoring is excluded
-// because it is currently commented out in registration.
-func allHandlers() []modules.ModuleHandler {
-	return []modules.ModuleHandler{
-		aigatewayModule.NewHandler(),
-		aipipelinesModule.NewHandler(),
-		dashboardModule.NewHandler(),
-		feastModule.NewHandler(),
-		kserveModule.NewHandler(),
-		mcplifecycleoperatorModule.NewHandler(),
-		mlflowoperatorModule.NewHandler(),
-		ogxModule.NewHandler(),
-		rayModule.NewHandler(),
-		workbenchesModule.NewHandler(),
-	}
-}
-
 func managedDSCContext() (*modules.DSCContext, *modules.ModuleCRConfig) {
 	return &modules.DSCContext{
-			DSC: &dscv2.DataScienceCluster{
-				Spec: dscv2.DataScienceClusterSpec{
-					Components: dscv2.Components{
-						AIPipelines: componentApi.DSCDataSciencePipelines{
-							ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Managed},
-						},
-						Dashboard: componentApi.DSCDashboard{
-							ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Managed},
-						},
-						AIGateway: componentApi.DSCAIGateway{
-							ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Managed},
-						},
-						Kserve: componentApi.DSCKserve{
-							ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Managed},
-						},
-						Workbenches: componentApi.DSCWorkbenches{
-							ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Managed},
-						},
-						FeastOperator: componentApi.DSCFeastOperator{
-							ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Managed},
-						},
-						MLflowOperator: componentApi.DSCMLflowOperator{
-							ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Managed},
-						},
-						MCPLifecycleOperator: componentApi.DSCMCPLifecycleOperator{
-							ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Managed},
-						},
-						OGX: componentApi.DSCOGX{
-							ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Managed},
-						},
-						Ray: componentApi.DSCRay{
-							ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Managed},
-						},
-					},
-				},
-			},
+			DSC:  &dscv2.DataScienceCluster{},
+			DSCI: &dsciv2.DSCInitialization{},
 		}, &modules.ModuleCRConfig{
 			ApplicationsNamespace: "opendatahub",
 			Release:               common.Release{Name: "Open Data Hub"},
@@ -99,7 +35,7 @@ func managedDSCPlatformContext() *modules.PlatformContext {
 
 func TestHandlerCompliance_GetNameIsNonEmpty(t *testing.T) {
 	seen := make(map[string]bool)
-	for _, h := range allHandlers() {
+	for _, h := range moduleHandlers() {
 		t.Run(h.GetName(), func(t *testing.T) {
 			g := NewWithT(t)
 			name := h.GetName()
@@ -111,7 +47,7 @@ func TestHandlerCompliance_GetNameIsNonEmpty(t *testing.T) {
 }
 
 func TestHandlerCompliance_GetGVK(t *testing.T) {
-	for _, h := range allHandlers() {
+	for _, h := range moduleHandlers() {
 		t.Run(h.GetName(), func(t *testing.T) {
 			g := NewWithT(t)
 			gvk := h.GetGVK()
@@ -124,7 +60,7 @@ func TestHandlerCompliance_GetGVK(t *testing.T) {
 
 func TestHandlerCompliance_GetOperatorManifestsReturnsAtLeastOneSource(t *testing.T) {
 	platform := managedDSCPlatformContext()
-	for _, h := range allHandlers() {
+	for _, h := range moduleHandlers() {
 		t.Run(h.GetName(), func(t *testing.T) {
 			g := NewWithT(t)
 			manifests := h.GetOperatorManifests(platform)
@@ -143,11 +79,12 @@ func TestHandlerCompliance_BuildModuleCR_ValidGVK(t *testing.T) {
 		t.Fatalf("create fake client: %v", err)
 	}
 
-	for _, h := range allHandlers() {
+	for _, h := range moduleHandlers() {
 		t.Run(h.GetName(), func(t *testing.T) {
 			g := NewWithT(t)
 			cr, err := h.BuildModuleCR(context.Background(), cli, dscCtx, cfg)
 			g.Expect(err).ShouldNot(HaveOccurred())
+			g.Expect(cr).ShouldNot(BeNil(), "registered handlers must build a module CR from a valid DSC/DSCI context")
 			if cr == nil {
 				return
 			}
@@ -157,26 +94,27 @@ func TestHandlerCompliance_BuildModuleCR_ValidGVK(t *testing.T) {
 				"CR GroupVersionKind must match handler GVK")
 			g.Expect(cr.GetName()).ShouldNot(BeEmpty(),
 				"CR must have a non-empty name")
+			g.Expect(cr.GetNamespace()).Should(BeEmpty(),
+				"module CRs must be cluster-scoped")
 		})
 	}
 }
 
 func TestHandlerCompliance_BuildModuleCR_NilContextReturnsError(t *testing.T) {
-	for _, h := range allHandlers() {
+	for _, h := range moduleHandlers() {
 		t.Run(h.GetName(), func(t *testing.T) {
 			g := NewWithT(t)
 			cr, err := h.BuildModuleCR(context.Background(), nil, nil, nil)
-			if err == nil && cr == nil {
-				t.Skipf("handler %s returns (nil, nil) for nil context — acceptable if externally managed", h.GetName())
-			}
 			g.Expect(err).Should(HaveOccurred(),
 				"BuildModuleCR should return an error when DSCContext is nil")
+			g.Expect(cr).Should(BeNil(),
+				"BuildModuleCR must not return a CR when DSCContext is nil")
 		})
 	}
 }
 
 func TestHandlerCompliance_IsEnabledFalseForNilPlatform(t *testing.T) {
-	for _, h := range allHandlers() {
+	for _, h := range moduleHandlers() {
 		t.Run(h.GetName(), func(t *testing.T) {
 			g := NewWithT(t)
 			g.Expect(h.IsEnabled(nil)).Should(BeFalse(),
@@ -186,7 +124,7 @@ func TestHandlerCompliance_IsEnabledFalseForNilPlatform(t *testing.T) {
 }
 
 func TestHandlerCompliance_IsEnabledFalseForEmptyPlatformModules(t *testing.T) {
-	for _, h := range allHandlers() {
+	for _, h := range moduleHandlers() {
 		t.Run(h.GetName(), func(t *testing.T) {
 			g := NewWithT(t)
 			empty := &configv1alpha1.PlatformModules{}
@@ -197,7 +135,7 @@ func TestHandlerCompliance_IsEnabledFalseForEmptyPlatformModules(t *testing.T) {
 }
 
 func TestHandlerCompliance_WriteDSCComponentStatusDoesNotPanicOnNilDSC(t *testing.T) {
-	for _, h := range allHandlers() {
+	for _, h := range moduleHandlers() {
 		t.Run(h.GetName(), func(t *testing.T) {
 			NewWithT(t)
 			h.WriteDSCComponentStatus(nil, true, nil)
@@ -207,7 +145,7 @@ func TestHandlerCompliance_WriteDSCComponentStatusDoesNotPanicOnNilDSC(t *testin
 }
 
 func TestHandlerCompliance_OptionalInterfaces(t *testing.T) {
-	for _, h := range allHandlers() {
+	for _, h := range moduleHandlers() {
 		t.Run(h.GetName(), func(t *testing.T) {
 			g := NewWithT(t)
 

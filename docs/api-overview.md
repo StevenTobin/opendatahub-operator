@@ -18,6 +18,7 @@ Package v1 contains API Schema definitions for the components v1 API group
 
 ### Resource Types
 - [Kueue](#kueue)
+- [MCPLifecycleOperator](#mcplifecycleoperator)
 - [TrustyAI](#trustyai)
 
 
@@ -85,6 +86,8 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `managementState` _[ManagementState](https://pkg.go.dev/github.com/openshift/api@v0.0.0-20260610192510-1b2a074e0bd6/operator/v1#ManagementState)_ | Set to one of the following values:<br />- "Managed" : the operator is actively managing the bundled Argo Workflows controllers.<br />              It will only upgrade the Argo Workflows controllers if it is safe to do so. This is the default<br />              behavior.<br />- "Removed" : the operator is not managing the bundled Argo Workflows controllers and will not install it.<br />              If it is installed, the operator will remove it but will not remove other Argo Workflows<br />              installations. | Managed | Enum: [Managed Removed] <br /> |
+
+
 
 
 #### DSCAIGateway
@@ -822,6 +825,24 @@ _Appears in:_
 
 
 
+#### Distribution
+
+
+
+Distribution describes the platform distribution context the module is
+currently aligned to, per the module onboarding guide.
+
+
+
+_Appears in:_
+- [MCPLifecycleOperatorStatus](#mcplifecycleoperatorstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `name` _string_ | Name is the distribution name (e.g. SelfManagedRHOAI, OpenDataHub, Standalone). |  |  |
+| `version` _string_ | Version is the distribution version (e.g. 3.5.1, 0.0.0). |  |  |
+
+
 #### FeastOperatorCommonSpec
 
 
@@ -1033,6 +1054,27 @@ _Appears in:_
 
 
 
+#### MCPLifecycleOperator
+
+
+
+MCPLifecycleOperator is the Schema for the mcplifecycleoperators API.
+
+
+
+
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `apiVersion` _string_ | `components.platform.opendatahub.io/v1alpha1` | | |
+| `kind` _string_ | `MCPLifecycleOperator` | | |
+| `kind` _string_ | Kind is a string value representing the REST resource this object represents.<br />Servers may infer this from the endpoint the client submits requests to.<br />Cannot be updated.<br />In CamelCase.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds |  |  |
+| `apiVersion` _string_ | APIVersion defines the versioned schema of this representation of an object.<br />Servers should convert recognized schemas to the latest internal value, and<br />may reject unrecognized values.<br />More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources |  |  |
+| `metadata` _[ObjectMeta](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.25/#objectmeta-v1-meta)_ | Refer to Kubernetes API documentation for fields of `metadata`. |  |  |
+| `spec` _[MCPLifecycleOperatorSpec](#mcplifecycleoperatorspec)_ |  |  |  |
+| `status` _[MCPLifecycleOperatorStatus](#mcplifecycleoperatorstatus)_ |  |  |  |
+
+
 #### MCPLifecycleOperatorCommonSpec
 
 
@@ -1058,6 +1100,42 @@ MCPLifecycleOperatorCommonStatus defines the shared observed state of MCPLifecyc
 _Appears in:_
 - [DSCMCPLifecycleOperatorStatus](#dscmcplifecycleoperatorstatus)
 
+
+
+#### MCPLifecycleOperatorSpec
+
+
+
+MCPLifecycleOperatorSpec defines the desired state of MCPLifecycleOperator.
+
+
+
+_Appears in:_
+- [MCPLifecycleOperator](#mcplifecycleoperator)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `managementState` _[ManagementState](https://pkg.go.dev/github.com/openshift/api@v0.0.0-20260610192510-1b2a074e0bd6/operator/v1#ManagementState)_ | ManagementState controls whether the operator actively manages the<br />component (Managed) or removes it (Removed). | Managed | Enum: [Managed Removed] <br /> |
+
+
+#### MCPLifecycleOperatorStatus
+
+
+
+MCPLifecycleOperatorStatus defines the observed state of MCPLifecycleOperator.
+
+
+
+_Appears in:_
+- [MCPLifecycleOperator](#mcplifecycleoperator)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `phase` _[Phase](#phase)_ | Phase is the top-level lifecycle phase of the module. |  |  |
+| `conditions` _[Condition](#condition) array_ | Conditions is the set of condition observations for this module. |  |  |
+| `observedGeneration` _integer_ | ObservedGeneration is the most recent .metadata.generation observed<br />by the controller. It allows consumers to determine whether the<br />controller has processed the latest spec changes. |  |  |
+| `releases` _[ComponentRelease](#componentrelease) array_ | Releases is the list of deployed component releases. |  |  |
+| `distribution` _[Distribution](#distribution)_ | Distribution is the platform distribution context the module is currently aligned to. |  |  |
 
 
 #### MLflowOperatorCommonSpec

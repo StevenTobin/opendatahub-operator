@@ -112,6 +112,18 @@ func TestBuildModuleCR_BasicProjection(t *testing.T) {
 	g.Expect(spec["mlflowEnabled"]).Should(BeFalse())
 }
 
+func TestBuildModuleCR_DefaultsEmptyManagementStateToRemoved(t *testing.T) {
+	g := NewWithT(t)
+	h := NewHandler()
+
+	u, err := h.BuildModuleCR(context.Background(), nil, newDSCCtx(""), newModuleCRConfig())
+	g.Expect(err).ShouldNot(HaveOccurred())
+
+	spec, ok := u.Object["spec"].(map[string]any)
+	g.Expect(ok).Should(BeTrue(), "spec is not a map")
+	g.Expect(spec["managementState"]).Should(Equal("Removed"))
+}
+
 func TestBuildModuleCR_ProjectsMLflowEnabled(t *testing.T) {
 	g := NewWithT(t)
 	h := NewHandler()
