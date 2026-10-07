@@ -2,31 +2,22 @@ package e2e_test
 
 import (
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
-	corev1 "k8s.io/api/core/v1"
+	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/components/kueue"
-	aigateway "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules/aigateway"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster/gvk"
-	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/controller/gates"
-)
 
-// workloadGVK is used to cleanup Kueue Workloads that may block namespace deletion.
-var workloadGVK = schema.GroupVersionKind{
-	Group:   "kueue.x-k8s.io",
-	Version: "v1beta1",
-	Kind:    "Workload",
-}
+	. "github.com/onsi/gomega"
+)
 
 // CleanupPreviousTestResources removes leftover resources from previous test runs.
 // This is called at the start of test suites to ensure a clean environment.
-// It handles: DSC, DSCI, AuthConfig, Kueue resources, and ResourceQuotas.
+// It removes platform-owned singleton resources before deleting test namespaces.
 func CleanupPreviousTestResources(t *testing.T) {
 	t.Helper()
 
@@ -37,29 +28,14 @@ func CleanupPreviousTestResources(t *testing.T) {
 	// Cleanup existing DataScienceCluster and DSCInitialization (single instances)
 	cleanupCoreOperatorResources(t, tc)
 
-	// The maas-controller Deployment carries a CleanupFinalizer (maas.opendatahub.io/cleanup)
-	// that requires the LifecycleReconciler (running inside the maas-controller pod) to release.
-	// If we delete the namespace directly, Kubernetes terminates the pod before the finalizer
-	// can be processed, leaving the namespace stuck in Terminating. Strip the finalizer first.
-	cleanupMaaSControllerFinalizer(t, tc)
-
-	// KServe deploys cluster-scoped webhook configurations (with failurePolicy: Fail) that
-	// reference services inside the applications namespace. If the namespace is deleted first,
-	// the services are gone but the webhooks remain, blocking any resource validation and
-	// leaving the namespace stuck in Terminating.
-	cleanupKserveWebhookConfigurations(t, tc)
-
-	// Delete the entire applications namespace - this removes all component resources at once
-	// (AuthConfig, ResourceQuotas, Kueue resources, etc.) and the operator will recreate as needed
+	// Core owner deletion above waits for controller finalizers and module cleanup
+	// before the shared applications namespace is removed.
 	t.Logf("Cleaning up applications namespace: %s", tc.AppsNamespace)
 	tc.DeleteResource(
 		WithMinimalObject(gvk.Namespace, types.NamespacedName{Name: tc.AppsNamespace}),
 		WithIgnoreNotFound(true),
 		WithWaitForDeletion(true),
 	)
-
-	// Cleanup Kueue cluster-scoped resources
-	cleanupKueueOperatorAndResources(t, tc)
 
 	// Cleanup CodeFlare resources
 	cleanupCodeFlareTestResources(t, tc)
@@ -72,195 +48,73 @@ func CleanupPreviousTestResources(t *testing.T) {
 func cleanupCoreOperatorResources(t *testing.T, tc *TestContext) {
 	t.Helper()
 
-	deleteResources := func(gvk schema.GroupVersionKind) {
-		t.Logf("Cleaning up %s with bulk operation", gvk.Kind)
-
-		tc.DeleteResources(
-			WithMinimalObject(gvk, types.NamespacedName{}),
-			WithWaitForDeletion(true),
-			WithIgnoreNotFound(true),
-			WithAcceptableErr(meta.IsNoMatchError, "IsNoMatchError"),
-		)
-	}
-
-	deleteResources(gvk.DataScienceCluster)
-	deleteResources(gvk.DSCInitialization)
-
-	// Delete Auth CR (cluster-scoped, not affected by namespace deletion)
-	deleteResources(gvk.Auth)
-}
-
-func cleanupKueueOperatorAndResources(t *testing.T, tc *TestContext) {
-	t.Helper()
-
-	cleanupAllKueueTestResources(t, tc)
-
-	// Uninstall ocp kueue operator if present
-	t.Logf("Uninstalling kueue operator")
-	tc.UninstallOperator(types.NamespacedName{Name: kueueOpName, Namespace: kueueOcpOperatorNamespace})
-}
-
-// cleanupAllKueueTestResources cleans up Kueue test namespaces (by label) and cluster-scoped resources.
-// It discovers labeled test namespaces, removes Workload finalizers, and deletes the namespaces.
-func cleanupAllKueueTestResources(t *testing.T, tc *TestContext) {
-	t.Helper()
-
-	t.Logf("Finding Kueue test namespaces by label %s=%s", kueueTestNamespaceLabel, kueueTestNamespaceLabelValue)
-	nsList := &corev1.NamespaceList{}
-	// Errors are logged but not fatal - cleanup runs at suite start and should not block other tests.
-	// Leftover namespaces from previous runs may persist but won't affect tests using unique names.
-	if err := tc.Client().List(tc.Context(), nsList, client.MatchingLabels{
-		kueueTestNamespaceLabel: kueueTestNamespaceLabelValue,
-	}); err != nil {
-		t.Logf("Warning: failed to list Kueue test namespaces, leftovers may persist: %v", err)
-		nsList.Items = nil
-	}
-	t.Logf("Found %d Kueue test namespaces", len(nsList.Items))
-
-	// Delete resources with finalizers that may block namespace deletion.
-	for _, ns := range nsList.Items {
-		nsName := ns.GetName()
-		t.Logf("Cleaning up Workloads and Notebooks in test namespace %s", nsName)
-		for _, resourceGVK := range []schema.GroupVersionKind{workloadGVK, gvk.Notebook} {
-			tc.DeleteResources(
-				WithMinimalObject(resourceGVK, types.NamespacedName{}),
-				WithNamespaceFilter(nsName),
-				WithIgnoreNotFound(true),
-				WithRemoveFinalizersOnDelete(true),
-				WithWaitForDeletion(false),
-				WithAcceptableErr(meta.IsNoMatchError, "IsNoMatchError"),
-			)
+	// The current default is v3. Try both versions so cleanup also handles a
+	// cluster left behind by an older v2 installation.
+	t.Logf("Cleaning up DataScienceCluster instance %s", tc.DataScienceClusterNamespacedName.Name)
+	for _, dscGVK := range []schema.GroupVersionKind{gvk.DataScienceCluster, gvk.DataScienceClusterV2} {
+		dsc := &unstructured.Unstructured{}
+		dsc.SetGroupVersionKind(dscGVK)
+		dsc.SetName(tc.DataScienceClusterNamespacedName.Name)
+		err := tc.Client().Delete(tc.Context(), dsc)
+		if err != nil && !k8serr.IsNotFound(err) && !meta.IsNoMatchError(err) {
+			require.NoError(t, err, "Failed to delete DataScienceCluster %s using %s", dsc.GetName(), dscGVK.GroupVersion())
 		}
 	}
 
-	for _, ns := range nsList.Items {
-		nsName := ns.GetName()
-		t.Logf("Deleting test namespace %s", nsName)
-		tc.DeleteResource(
-			WithMinimalObject(gvk.Namespace, types.NamespacedName{Name: nsName}),
-			WithIgnoreNotFound(true),
-			WithRemoveFinalizersOnDelete(true),
-			WithWaitForDeletion(false),
-		)
-	}
+	deleteDSCIAfterDSCDeletion(t, tc)
 
-	// Also clean up cluster-scoped resources
-	cleanupKueueClusterScopedResources(t, tc)
-}
-
-// cleanupKueueClusterScopedResources cleans up cluster-scoped Kueue resources (ClusterQueue, ResourceFlavor, KueueConfig).
-func cleanupKueueClusterScopedResources(t *testing.T, tc *TestContext) {
-	t.Helper()
-
-	t.Logf("Cleaning up Kueue cluster-scoped resources")
-	clusterScopedResources := []struct {
-		gvk            schema.GroupVersionKind
-		namespacedName types.NamespacedName
-	}{
-		{gvk.ClusterQueue, types.NamespacedName{Name: kueueDefaultClusterQueueName}},
-		{gvk.ResourceFlavor, types.NamespacedName{Name: kueue.DefaultFlavorName}},
-		{gvk.KueueConfigV1, types.NamespacedName{Name: kueue.KueueCRName}},
-	}
-
-	t.Logf("Will attempt to delete %d Kueue resources", len(clusterScopedResources))
-
-	for _, resource := range clusterScopedResources {
-		t.Logf("Attempting to delete %s %s/%s", resource.gvk.Kind, resource.namespacedName.Namespace, resource.namespacedName.Name)
-
-		tc.DeleteResource(
-			WithMinimalObject(resource.gvk, resource.namespacedName),
-			WithIgnoreNotFound(true),
-			WithRemoveFinalizersOnDelete(true),
-			WithWaitForDeletion(false),
-			WithAcceptableErr(meta.IsNoMatchError, "IsNoMatchError"),
-		)
-		t.Logf("Successfully processed deletion of %s %s/%s", resource.gvk.Kind, resource.namespacedName.Namespace, resource.namespacedName.Name)
-	}
-}
-
-// cleanupMaaSControllerFinalizer strips the maas.opendatahub.io/cleanup finalizer
-// from the maas-controller Deployment so it doesn't block namespace deletion.
-// The LifecycleReconciler inside the maas-controller pod manages this finalizer,
-// but when the namespace is deleted the pod is terminated before it can release it.
-func cleanupMaaSControllerFinalizer(t *testing.T, tc *TestContext) {
-	t.Helper()
-
-	t.Log("Removing maas-controller cleanup finalizer (if present)")
-	tc.DeleteResource(
-		WithMinimalObject(gvk.Deployment, types.NamespacedName{
-			Name:      aigateway.MaaSControllerDeploymentName,
-			Namespace: tc.AppsNamespace,
-		}),
+	// Delete Auth CR (cluster-scoped, not affected by namespace deletion).
+	tc.DeleteResources(
+		WithMinimalObject(gvk.Auth, types.NamespacedName{}),
+		WithWaitForDeletion(true),
 		WithIgnoreNotFound(true),
-		WithRemoveFinalizersOnDelete(true),
-		WithWaitForDeletion(false),
-	)
-}
-
-func cleanupKserveWebhookConfigurations(t *testing.T, tc *TestContext) {
-	t.Helper()
-
-	t.Log("Removing KServe webhook configurations that block namespace deletion")
-	webhooks := []struct {
-		gvk  schema.GroupVersionKind
-		name string
-	}{
-		{gvk.MutatingWebhookConfiguration, "llminferenceservice.serving.kserve.io"},
-		{gvk.ValidatingWebhookConfiguration, "llminferenceservice.serving.kserve.io"},
-		{gvk.ValidatingWebhookConfiguration, "llminferenceserviceconfig.serving.kserve.io"},
-		{gvk.MutatingWebhookConfiguration, "inferenceservice.serving.kserve.io"},
-		{gvk.ValidatingWebhookConfiguration, "inferenceservice.serving.kserve.io"},
-		{gvk.ValidatingWebhookConfiguration, "trainedmodel.serving.kserve.io"},
-		{gvk.ValidatingWebhookConfiguration, "inferencegraph.serving.kserve.io"},
-		{gvk.ValidatingWebhookConfiguration, "clusterservingruntime.serving.kserve.io"},
-		{gvk.ValidatingWebhookConfiguration, "servingruntime.serving.kserve.io"},
-		{gvk.ValidatingWebhookConfiguration, "localmodelcache.serving.kserve.io"},
-	}
-
-	for _, wh := range webhooks {
-		tc.DeleteResource(
-			WithMinimalObject(wh.gvk, types.NamespacedName{Name: wh.name}),
-			WithIgnoreNotFound(true),
-			WithWaitForDeletion(true),
-		)
-	}
-
-	// Strip finalizers from LLMInferenceServiceConfig resources. The kserve
-	// controller that processes llmisvcconfig-finalizer is already gone at
-	// this point (its Deployment was deleted as part of kserve teardown), so
-	// these resources would be stuck in Terminating indefinitely.
-	// Uses individual DeleteResource calls because DeleteResources (bulk
-	// DeleteAllOf) does not honor WithRemoveFinalizersOnDelete.
-	t.Log("Stripping finalizers from LLMInferenceServiceConfig resources")
-	llmConfigs := tc.FetchResources(
-		WithMinimalObject(gvk.LLMInferenceServiceConfigV1Alpha2, types.NamespacedName{}),
-		WithListOptions(&client.ListOptions{Namespace: tc.AppsNamespace}),
 		WithAcceptableErr(meta.IsNoMatchError, "IsNoMatchError"),
 	)
-	for _, cfg := range llmConfigs {
-		tc.DeleteResource(
-			WithMinimalObject(gvk.LLMInferenceServiceConfigV1Alpha2, types.NamespacedName{
-				Namespace: cfg.GetNamespace(),
-				Name:      cfg.GetName(),
-			}),
-			WithIgnoreNotFound(true),
-			WithRemoveFinalizersOnDelete(true),
-			WithWaitForDeletion(false),
-		)
-	}
+}
+
+// deleteDSCIAfterDSCDeletion retries the DSCI delete while the validating
+// webhook observes the DSC during its asynchronous deletion window.
+func deleteDSCIAfterDSCDeletion(t *testing.T, tc *TestContext) {
+	t.Helper()
+
+	nn := tc.DSCInitializationNamespacedName
+	var deleteErr error
+	tc.g.Eventually(func() bool {
+		dsci := &unstructured.Unstructured{}
+		dsci.SetGroupVersionKind(gvk.DSCInitialization)
+		dsci.SetName(nn.Name)
+		deleteErr = tc.Client().Delete(tc.Context(), dsci)
+		if k8serr.IsNotFound(deleteErr) {
+			return true
+		}
+		if k8serr.IsForbidden(deleteErr) {
+			return false
+		}
+		require.NoError(t, deleteErr, "Failed to delete DSCInitialization instance %s", nn.Name)
+		return true
+	}).WithTimeout(tc.TestTimeouts.mediumEventuallyTimeout).
+		WithPolling(tc.TestTimeouts.defaultEventuallyPollInterval).
+		Should(BeTrue(), "DSCInitialization deletion remained blocked: %v", deleteErr)
+
+	tc.EnsureResourceGone(
+		WithMinimalObject(gvk.DSCInitialization, nn),
+		WithCustomErrorMsg("DSCInitialization instance %s was not fully deleted", nn.Name),
+	)
 }
 
 func cleanupGateSourceConfigMaps(t *testing.T, tc *TestContext) {
 	t.Helper()
 
-	t.Log("Cleaning up stale upgrade-gate ConfigMaps from previous test runs")
-	tc.DeleteResources(
-		WithMinimalObject(gvk.ConfigMap, types.NamespacedName{}),
-		WithNamespaceFilter(tc.OperatorNamespace),
-		WithDeleteAllOfOptions(client.MatchingLabels{gates.UpgradeGateLabel: "true"}),
-		WithIgnoreNotFound(true),
-		WithWaitForDeletion(false),
-	)
+	for _, name := range []string{"e2e-gate-source-1", "e2e-gate-source-2"} {
+		tc.DeleteResource(
+			WithMinimalObject(gvk.ConfigMap, types.NamespacedName{
+				Namespace: tc.OperatorNamespace,
+				Name:      name,
+			}),
+			WithIgnoreNotFound(true),
+			WithWaitForDeletion(false),
+		)
+	}
 }
 
 func cleanupCodeFlareTestResources(t *testing.T, tc *TestContext) {
@@ -273,32 +127,5 @@ func cleanupCodeFlareTestResources(t *testing.T, tc *TestContext) {
 		WithIgnoreNotFound(true),
 		WithWaitForDeletion(false),
 		WithAcceptableErr(meta.IsNoMatchError, "IsNoMatchError"),
-	)
-}
-
-// cleanupStaleMLflowInstances deletes any leftover MLflow tracking-server
-// instances (mlflow.opendatahub.io/v1, Kind=MLflow). The mlflow-operator refuses to delete itself while any
-// MLflow instance exists (finalizer mlflow.opendatahub.io/mlflow-operator-protection,
-// condition reason MLflowInstancesPresent), so a stray instance left behind by
-// another test suite sharing the cluster would otherwise permanently block
-// setting MLflow operator component to Removed later in the test suite (see RHOAIENG-92805).
-// The MLflow CRD may not be registered at all if MLflowOperator was never enabled, so a NoMatchError is
-// expected and acceptable.
-func cleanupStaleMLflowInstances(t *testing.T) {
-	t.Helper()
-
-	// Initialize the test context.
-	tc, err := NewTestContext(t)
-	require.NoError(t, err, "Failed to initialize test context")
-
-	t.Log("Removing any stale MLflow instances that could block MLflowOperator deletion")
-
-	tc.DeleteResources(
-		WithMinimalObject(gvk.MLflow, types.NamespacedName{}),
-		WithWaitForDeletion(true),
-		WithIgnoreNotFound(true),
-		WithAcceptableErr(meta.IsNoMatchError, "IsNoMatchError"),
-		WithEventuallyTimeout(2*time.Minute),
-		WithEventuallyPollingInterval(5*time.Second),
 	)
 }

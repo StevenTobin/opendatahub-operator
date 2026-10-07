@@ -1,7 +1,6 @@
 package e2e_test
 
 import (
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -43,11 +42,6 @@ import (
 
 // Namespace and Operator Constants.
 const (
-
-	// Component API field name constants for v1 <-> v2 conversion.
-	dataSciencePipelinesKind          = "DataSciencePipelines" // Kind name for DataSciencePipelines component
-	dataSciencePipelinesComponentName = "datasciencepipelines" // v1 API component name for DataSciencePipelines
-	aiPipelinesFieldName              = "aipipelines"          // v2 API field name for DataSciencePipelines component
 
 	// Test timing constants.
 	// controllerCacheRefreshDelay is the time to wait for controller-runtime
@@ -100,14 +94,6 @@ const (
 	resourceFetchErrorMsg        = "Error occurred while fetching the resource '%s' of kind '%s': %v"
 	unexpectedErrorMismatchMsg   = "Expected error '%v' to match the actual error '%v' for resource of kind '%s'."
 )
-
-type Operator struct {
-	nn                  types.NamespacedName
-	skipOperatorGroup   bool
-	globalOperatorGroup bool
-	channel             string
-	useOLMv1            bool
-}
 
 // TestCaseOpts defines a function type that can be used to modify how individual test cases are executed.
 type TestCaseOpts func(t *testing.T)
@@ -236,102 +222,36 @@ func CreateDSC(name string, workbenchesNamespace string) *dscApi.DataScienceClus
 		},
 		Spec: dscApi.DataScienceClusterSpec{
 			Components: dscApi.Components{
-				// keep dashboard as enabled, because other test is rely on this
 				Dashboard: componentApi.DSCDashboard{
 					DashboardCommonSpec: componentApi.DashboardCommonSpec{
 						Standard: componentApi.DashboardStandardSpec{
-							ManagementSpec: common.ManagementSpec{
-								ManagementState: operatorv1.Removed,
-							},
+							ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Removed},
 						},
 					},
 				},
 				Workbenches: componentApi.DSCWorkbenches{
-					ManagementSpec: common.ManagementSpec{
-						ManagementState: operatorv1.Removed,
-					},
+					ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Removed},
 					WorkbenchesCommonSpec: componentApi.WorkbenchesCommonSpec{
 						WorkbenchNamespace: workbenchesNamespace,
-						WorkbenchesV2: componentApi.WorkbenchesV2Spec{
-							ManagementState: operatorv1.Removed,
-						},
+						WorkbenchesV2:      componentApi.WorkbenchesV2Spec{ManagementState: operatorv1.Removed},
 					},
 				},
-				AIPipelines: componentApi.DSCDataSciencePipelines{
-					ManagementSpec: common.ManagementSpec{
-						ManagementState: operatorv1.Removed,
-					},
-				},
-				Kserve: componentApi.DSCKserve{
-					ManagementSpec: common.ManagementSpec{
-						ManagementState: operatorv1.Removed,
-					},
-				},
-				Ray: componentApi.DSCRay{
-					ManagementSpec: common.ManagementSpec{
-						ManagementState: operatorv1.Removed,
-					},
-				},
-				Kueue: componentApi.DSCKueue{
-					KueueManagementSpec: componentApi.KueueManagementSpec{
-						ManagementState: operatorv1.Removed,
-					},
-				},
-				TrustyAI: componentApi.DSCTrustyAI{
-					ManagementSpec: common.ManagementSpec{
-						ManagementState: operatorv1.Removed,
-					},
-				},
-				AIHub: componentApi.DSCAIHub{
-					ManagementSpec: common.ManagementSpec{
-						ManagementState: operatorv1.Removed,
-					},
-					AIHubCommonSpec: componentApi.AIHubCommonSpec{
-						InstancesNamespace: componentApi.DefaultModelRegistriesNamespace,
-					},
-				},
-				Trainer: componentApi.DSCTrainer{
-					ManagementSpec: common.ManagementSpec{
-						ManagementState: operatorv1.Removed,
-					},
-				},
-				Data: componentApi.DSCData{
-					FeatureStore: componentApi.DSCFeatureStore{
-						ManagementSpec: common.ManagementSpec{
-							ManagementState: operatorv1.Removed,
-						},
-					},
-				},
-				OGX: componentApi.DSCOGX{
-					ManagementSpec: common.ManagementSpec{
-						ManagementState: operatorv1.Removed,
-					},
-				},
-				MLflowOperator: componentApi.DSCMLflowOperator{
-					ManagementSpec: common.ManagementSpec{
-						ManagementState: operatorv1.Removed,
-					},
-				},
-				SparkOperator: componentApi.DSCSparkOperator{
-					ManagementSpec: common.ManagementSpec{
-						ManagementState: operatorv1.Removed,
-					},
-				},
-				AIGateway: componentApi.DSCAIGateway{
-					ManagementSpec: common.ManagementSpec{
-						ManagementState: operatorv1.Removed,
-					},
-				},
-				MCPLifecycleOperator: componentApi.DSCMCPLifecycleOperator{
-					ManagementSpec: common.ManagementSpec{
-						ManagementState: operatorv1.Removed,
-					},
-				},
-				DatabaseService: componentApi.DSCDatabaseService{
-					ManagementSpec: common.ManagementSpec{
-						ManagementState: operatorv1.Removed,
-					},
-				},
+				AIPipelines: componentApi.DSCDataSciencePipelines{ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Removed}},
+				Kserve:      componentApi.DSCKserve{ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Removed}},
+				Ray:         componentApi.DSCRay{ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Removed}},
+				Kueue:       componentApi.DSCKueue{KueueManagementSpec: componentApi.KueueManagementSpec{ManagementState: operatorv1.Removed}},
+				TrustyAI:    componentApi.DSCTrustyAI{ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Removed}},
+				AIHub:       componentApi.DSCAIHub{ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Removed}},
+				Data: componentApi.DSCData{FeatureStore: componentApi.DSCFeatureStore{
+					ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Removed},
+				}},
+				OGX:                  componentApi.DSCOGX{ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Removed}},
+				MLflowOperator:       componentApi.DSCMLflowOperator{ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Removed}},
+				Trainer:              componentApi.DSCTrainer{ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Removed}},
+				SparkOperator:        componentApi.DSCSparkOperator{ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Removed}},
+				AIGateway:            componentApi.DSCAIGateway{ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Removed}},
+				MCPLifecycleOperator: componentApi.DSCMCPLifecycleOperator{ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Removed}},
+				DatabaseService:      componentApi.DSCDatabaseService{ManagementSpec: common.ManagementSpec{ManagementState: operatorv1.Removed}},
 			},
 		},
 	}
@@ -446,35 +366,6 @@ func (tc *TestContext) getControllerDeploymentName() string {
 	return getControllerDeploymentNameByPlatform(platform)
 }
 
-// ensureOperatorsAreInstalled ensures the specified operators are installed using parallel test cases.
-func (tc *TestContext) ensureOperatorsAreInstalled(t *testing.T, operators []Operator) {
-	t.Helper()
-	// Create and run test cases in parallel.
-	testCases := make([]TestCase, len(operators))
-	for i, op := range operators {
-		testCases[i] = TestCase{
-			name: fmt.Sprintf("Ensure %s is installed", op.nn.Name),
-			testFn: func(t *testing.T) {
-				t.Helper()
-				if op.useOLMv1 {
-					tc.EnsureOperatorInstalledViaClusterExtension(op.nn, op.channel)
-				} else {
-					switch {
-					case op.skipOperatorGroup:
-						tc.EnsureOperatorInstalledWithChannel(op.nn, op.channel)
-					case op.globalOperatorGroup:
-						tc.EnsureOperatorInstalledWithGlobalOperatorGroupAndChannel(op.nn, op.channel)
-					default:
-						tc.EnsureOperatorInstalledWithLocalOperatorGroupAndChannel(op.nn, op.channel)
-					}
-				}
-			},
-		}
-	}
-
-	RunTestCases(t, testCases, WithParallel())
-}
-
 func getControllerDeploymentNameByPlatform(platform common.Platform) string {
 	switch platform {
 	case cluster.SelfManagedRhoai, cluster.ManagedRhoai:
@@ -559,7 +450,7 @@ func RestoreDSCIandDSCFromBackup(t *testing.T, dsciBackupPath, dscBackupPath str
 	if dsciBackupPath != "" || dscBackupPath != "" {
 		var err error
 		// Initialize the test context.
-		tc, err = newTestContext(t, context.WithoutCancel(t.Context()))
+		tc, err = NewTestContext(t)
 		require.NoError(t, err, "Failed to initialize test context")
 	}
 	if dsciBackupPath != "" {

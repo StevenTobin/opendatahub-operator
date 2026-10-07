@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/opendatahub-io/opendatahub-operator/pkg/scoperules"
+	modulebuiltin "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules/builtin"
 )
 
 // e2eScopeRulesRelPath is scoperules.DefaultPath made relative to this
@@ -23,22 +24,14 @@ func loadMinimalScopeRules(t *testing.T) *scoperules.Rules {
 	return rules
 }
 
-// TestScopeRulesComponentsMatchRealTestGroup checks something
-// cmd/main_test.go's completeness tests can't: every e2e-scope-rules.yaml
-// components.<name> entry that isn't covered:false must be a name
-// Components.Validate() actually accepts, since that's what feeds into
-// E2E_TEST_COMPONENT. cmd/main.go's existingComponents and this TestGroup
-// happen to agree today, but nothing ties them together -- cmd/main.go is
-// package main and can't be imported here, so this is the only place both
-// sides are visible together. A selectable name that isn't a real
-// TestGroup value would pass every other check and only surface in
-// production by hard-failing the e2e binary at TestGroup.Validate().
-func TestScopeRulesComponentsMatchRealTestGroup(t *testing.T) {
+// TestScopeRulesModulesMatchBuiltinRegistry keeps selective E2E attribution in
+// sync with the production module registry used by the DAG contract suite.
+func TestScopeRulesModulesMatchBuiltinRegistry(t *testing.T) {
 	rules := loadMinimalScopeRules(t)
 
 	realNames := map[string]bool{}
-	for _, n := range Components.Names() {
-		realNames[n] = true
+	for _, name := range modulebuiltin.Names() {
+		realNames[name] = true
 	}
 
 	for name, entry := range rules.Components {
@@ -46,20 +39,18 @@ func TestScopeRulesComponentsMatchRealTestGroup(t *testing.T) {
 			continue
 		}
 		if !realNames[name] {
-			t.Errorf("e2e-scope-rules.yaml components.%s is selectable but %q is not a real name in tests/e2e's Components TestGroup -- TestGroup.Validate() would reject it", name, name)
+			t.Errorf("e2e-scope-rules.yaml components.%s is selectable but %q is not a registered module", name, name)
 		}
 	}
 
-	// A name reachable only via some other entry's deps -- e.g.
-	// "kserve-modelcache", a dependency of kserve's own test scenario, not
-	// a separately-registered component -- is already correctly
-	// selectable without a dedicated entry of its own.
-	deps := scoperules.DepsTargets(rules.Components)
-	for _, name := range Components.Names() {
-		_, hasEntry := rules.Components[name]
-		if !hasEntry && !deps[name] {
-			t.Errorf("tests/e2e's Components TestGroup has %q but e2e-scope-rules.yaml has no components.%s entry "+
-				"and no entry depends on it -- the resolver can never select it, forcing a full-suite run for any change to it", name, name)
+	for _, name := range modulebuiltin.Names() {
+		entry, hasEntry := rules.Components[name]
+		if !hasEntry {
+			t.Errorf("registered module %q has no components.%s entry in e2e-scope-rules.yaml", name, name)
+			continue
+		}
+		if !entry.IsCovered() {
+			t.Errorf("registered module %q is marked uncovered even though every module participates in the DAG contract suite", name)
 		}
 	}
 }

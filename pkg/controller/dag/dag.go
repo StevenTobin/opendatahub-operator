@@ -129,8 +129,27 @@ const DefaultTimeout = 10 * time.Minute
 
 var (
 	runlevelPolicyMu        sync.RWMutex
+	defaultTimeout          = DefaultTimeout
 	runlevelPolicyOverrides = map[int]RunlevelPolicy{}
 )
+
+// SetDefaultTimeout overrides the default timeout used by runlevels without a
+// specific policy. The production default remains DefaultTimeout; tests and
+// specialized deployments can provide a shorter startup-configured value.
+func SetDefaultTimeout(timeout time.Duration) {
+	runlevelPolicyMu.Lock()
+	defer runlevelPolicyMu.Unlock()
+
+	defaultTimeout = timeout
+}
+
+// GetDefaultTimeout returns the active default runlevel timeout.
+func GetDefaultTimeout() time.Duration {
+	runlevelPolicyMu.RLock()
+	defer runlevelPolicyMu.RUnlock()
+
+	return defaultTimeout
+}
 
 // SetRunlevelPolicy sets a per-runlevel timeout override.
 // Use Timeout: 0 to block forever (never skip).
@@ -159,7 +178,7 @@ func GetRunlevelPolicy(order int) RunlevelPolicy {
 	if p, ok := runlevelPolicyOverrides[order]; ok {
 		return p
 	}
-	return RunlevelPolicy{Timeout: DefaultTimeout}
+	return RunlevelPolicy{Timeout: defaultTimeout}
 }
 
 // FormatDuration formats a duration for human-readable condition messages.

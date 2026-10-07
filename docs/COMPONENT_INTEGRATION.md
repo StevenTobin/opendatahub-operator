@@ -7,15 +7,16 @@ The platform supports two integration models:
 | Model | When to use | Where the reconciler lives | Registration |
 |-------|-------------|----------------------------|--------------|
 | **In-tree component** | Legacy / not yet modularized | `internal/controller/components/<name>/` | `existingComponents` in `cmd/main.go` |
-| **Out-of-tree module** | Preferred for new work and migrations | Standalone module-operator repo + thin handler in `internal/controller/modules/<name>/` | `existingModules` in `cmd/main.go` |
+| **Out-of-tree module** | Preferred for new work and migrations | Standalone module-operator repo + thin handler in `internal/controller/modules/<name>/` | `builtin.Registrations()` in `internal/controller/modules/builtin/handlers.go` |
 
 This document covers **in-tree component** integration. For out-of-tree
 modules (for example AI Gateway and Spark Operator), follow
 [`internal/controller/modules/README.md`](../internal/controller/modules/README.md)
-instead — embed `BaseHandler`, implement `IsEnabled` / `BuildModuleCR`, and
-register the handler in `existingModules`. Do **not** add a static
-`.Owns()` for module CRs on the DSC controller; the modules controller uses
-dynamic ownership.
+instead — embed `BaseHandler`, implement the source-specific enablement,
+Platform projection, and module-CR construction methods, and add a built-in
+registration with its runlevel and DSC/DSCI configuration source. Do **not**
+add a static `.Owns()` for module CRs on the DSC controller; source-controller
+ownership and the modules controller's dynamic ownership handle the lifecycle.
 
 To understand the current operator architecture and its inner workings, please refer to [the design document](https://github.com/opendatahub-io/opendatahub-operator/blob/main/docs/DESIGN.md).
 
@@ -360,16 +361,31 @@ import (
 
 ### 3. Add unit and e2e tests
 
-Please add `unit` tests for any component-specific functions added to the codebase.
+Add unit tests for all component-specific behavior.
 
-Please also add [e2e tests](https://github.com/opendatahub-io/opendatahub-operator/tree/main/tests/e2e) to
-the e2e test suite to capture deployments introduced by the new component.
-Existing e2e test suites for the integrated components can be also found there.
+The legacy per-component E2E suites, files, `Components` `TestGroup`, and
+`E2E_TEST_COMPONENT(S)` selectors have been removed. Do not add a new
+`<component>_test.go` suite or component selector entry. For a legacy in-tree
+component, run the full OpenShift E2E suite for integration confidence and add
+focused scenarios only to an existing lifecycle, webhook, or service suite
+when that suite owns the behavior.
 
-Lastly, please update the following files to fully integrate new component tests into the overall test suite:
-- update `CreateDSC()` function in `tests/e2e/helper_test.go` to set new component in DSC
-- update `componentsTestSuites` map in `tests/e2e/controller_test.go` to include the reference for the new component e2e test suite
-- add a `components.<name>` entry to `tests/e2e/scripts/e2e-scope-rules.yaml`, so path-based e2e test scoping (see [docs/e2e-testing.md](e2e-testing.md#path-based-test-scoping)) knows about the new component. `cmd/main_test.go` and `tests/e2e/e2e_scope_rules_registry_test.go` fail if this is missing, though see that doc's follow-up gap note on when those tests actually run.
+The preferred module path has automatic contract coverage: once a handler is
+added to `builtin.Registrations()`, the OpenShift DAG ordering suite discovers
+it, orders it by its production runlevel, and runs its module contract as an
+isolated child test. The contract covers source ownership, module CR status and
+platform release, operator Deployment availability, required
+`APPLICATIONS_NAMESPACE`/`RELATED_IMAGE_*` injection, and DSC or DSCI status
+propagation. It is controlled by `E2E_TEST_DAG_ORDERING` /
+`--test-dag-ordering`; xKS coverage is deferred and `make e2e-test-xks`
+disables the contract.
+
+Add a `components.<name>` entry to
+`tests/e2e/scripts/e2e-scope-rules.yaml` for registry completeness and path
+ownership. Mark a legacy in-tree component `covered: false` when it has no
+remaining E2E contract. Scope resolution can narrow Auth/Gateway service tests,
+but it does not filter the registered-module DAG contract. See
+[the E2E guide](e2e-testing.md#path-based-test-scoping).
 
 ### 4. Update Prometheus config and tests
 
@@ -401,16 +417,7 @@ modules controller's dynamic ownership path (see
 Controller implementations live under `internal/controller/components/`.
 APIs live under `api/components/v1alpha1/`.
 
-- [Dashboard](https://github.com/opendatahub-io/odh-dashboard)
-- [KServe](https://github.com/opendatahub-io/kserve)
-- [Model Controller](https://github.com/opendatahub-io/odh-model-controller)
-- [ModelRegistry](https://github.com/opendatahub-io/model-registry)
-- [Ray](https://github.com/opendatahub-io/kuberay)
-- [Trainer](https://github.com/opendatahub-io/trainer)
-- [TrustyAI](https://github.com/opendatahub-io/trustyai-service-operator)
-- [Workbenches](https://github.com/opendatahub-io/notebooks)
-- [Feast Operator](https://github.com/opendatahub-io/feast)
-- [MLflow Operator](https://github.com/opendatahub-io/mlflow-operator)
+- [Kueue](https://github.com/opendatahub-io/kueue)
 
 ### Out-of-tree modules
 
@@ -418,9 +425,14 @@ Platform handlers live under `internal/controller/modules/`. The workload /
 module operators live in their own repositories. See
 [modules README](../internal/controller/modules/README.md).
 
-- [AI Gateway](https://github.com/opendatahub-io/ai-gateway-operator) — handler: `internal/controller/modules/aigateway/`
-- [Spark Operator](https://github.com/opendatahub-io/spark-operator/tree/main/spark-operator-module) — handler: `internal/controller/modules/sparkoperator/`
-- [AI Pipelines](https://github.com/opendatahub-io/data-science-pipelines-operator) — handler: `internal/controller/modules/aipipelines/`
-- [Monitoring and observability (odh-observability)](https://github.com/opendatahub-io/odh-observability) — handler: `internal/controller/modules/monitoring/`
-  - [Observability deployment modes](https://github.com/opendatahub-io/odh-observability/blob/main/docs/observability-modes.md)
-  - [Korrel8r](https://github.com/opendatahub-io/odh-observability/blob/main/docs/korrel8r.md)
+Built-in production registrations are:
+
+- runlevel 20: AI Pipelines, Dashboard, MCP Lifecycle Operator, Model Registry,
+  Ray, Trainer, Workbenches, and Monitoring;
+- runlevel 31: KServe; and
+- runlevel 32: AI Gateway, Feast Operator, MLflow Operator, OGX, Spark Operator,
+  and TrustyAI.
+
+Monitoring is configured from `DSCInitialization.spec.monitoring` and its module
+CR is owned by DSCI. Every other module above is DSC-backed. Auth and Gateway
+remain services rather than modules.

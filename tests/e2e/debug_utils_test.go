@@ -141,6 +141,7 @@ func runDiagnosticsOnce(key string, testName string) {
 
 // runDiagnosticsAndClassify collects cluster health data via clusterhealth.Run(),
 // logs the report for CI visibility, and classifies the failure.
+
 func runDiagnosticsAndClassify(testName string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -171,7 +172,6 @@ func runDiagnosticsAndClassify(testName string) {
 	}
 
 	logReport(report)
-
 	fc := failureclassifier.Classify(report)
 	redactEvidence(&fc)
 	failureclassifier.EmitClassification(fc, testName)

@@ -265,6 +265,8 @@ func main() { //nolint:funlen,maintidx,gocyclo
 		os.Exit(1)
 	}
 
+	dag.SetDefaultTimeout(flags.GetDAGRunlevelTimeout())
+
 	// Register handlers and apply suppression flags disabling the corresponding component/service/module
 	registerComponents()
 	registerServices()

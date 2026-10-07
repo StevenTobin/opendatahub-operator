@@ -52,8 +52,6 @@ validate_bool E2E_TEST_BACKUP_AND_RESTORE_DSCI_AND_DSC
 : "${E2E_TEST_OPERATOR_CONTROLLER:=true}"
 validate_bool E2E_TEST_OPERATOR_CONTROLLER
 
-: "${E2E_TEST_DEPENDANT_OPERATORS_MANAGEMENT:=false}"
-validate_bool E2E_TEST_DEPENDANT_OPERATORS_MANAGEMENT
 
 : "${E2E_TEST_DSC_MANAGEMENT:=false}"
 validate_bool E2E_TEST_DSC_MANAGEMENT
@@ -61,30 +59,12 @@ validate_bool E2E_TEST_DSC_MANAGEMENT
 : "${E2E_TEST_OPERATOR_RESILIENCE:=true}"
 validate_bool E2E_TEST_OPERATOR_RESILIENCE
 
-: "${E2E_TEST_OPERATOR_V2TOV3UPGRADE:=true}"
-validate_bool E2E_TEST_OPERATOR_V2TOV3UPGRADE
 
 : "${E2E_TEST_WEBHOOK:=true}"
 validate_bool E2E_TEST_WEBHOOK
 
-: "${E2E_TEST_CONVERSION_WEBHOOK:=true}"
-validate_bool E2E_TEST_CONVERSION_WEBHOOK
-
-: "${E2E_TEST_CONVERSION_WEBHOOK_DSC:=true}"
-validate_bool E2E_TEST_CONVERSION_WEBHOOK_DSC
-
-: "${E2E_TEST_CONVERSION_WEBHOOK_PLATFORM:=true}"
-validate_bool E2E_TEST_CONVERSION_WEBHOOK_PLATFORM
-
-# Deprecated: per-component tests are superseded by platform orchestration tests.
-# Remove once modularisation is complete.
-: "${E2E_TEST_COMPONENTS:=true}"
-validate_bool E2E_TEST_COMPONENTS
-
-: "${E2E_TEST_PLATFORM_ORCHESTRATION:=true}"
-validate_bool E2E_TEST_PLATFORM_ORCHESTRATION
-
-: "${E2E_TEST_PLATFORM_COMPONENT:=}"
+: "${E2E_TEST_DAG_ORDERING:=true}"
+validate_bool E2E_TEST_DAG_ORDERING
 
 : "${E2E_TEST_SERVICES:=true}"
 validate_bool E2E_TEST_SERVICES
@@ -110,8 +90,6 @@ validate_namespace E2E_TEST_DSC_MONITORING_NAMESPACE
 
 : "${E2E_TEST_TAG:=All}"
 validate_tag E2E_TEST_TAG
-
-: "${E2E_TEST_TIMEOUT:=110m}"
 
 # Toggle for JUnit XML enrichment with failure classification (default: disabled)
 : "${USE_TEST_RETRY:=false}"
@@ -164,22 +142,15 @@ if [ "$USE_TEST_RETRY" = "true" ] || [ "$USE_TEST_RETRY" = "1" ]; then
     --junit-output "$JUNIT_FILE" \
     --verbose \
     ${GITHUB_PR_FLAGS} \
-    -- --test.parallel=8 --test.timeout="$E2E_TEST_TIMEOUT" \
+    -- --test.parallel=8 \
     --deletion-policy="$E2E_TEST_DELETION_POLICY" \
     --clean-up-previous-resources="$E2E_TEST_CLEAN_UP_PREVIOUS_RESOURCES" \
     --backup-and-restore-dsci-and-dsc="$E2E_TEST_BACKUP_AND_RESTORE_DSCI_AND_DSC" \
     --test-operator-controller="$E2E_TEST_OPERATOR_CONTROLLER" \
-    --test-dependant-operators-management="$E2E_TEST_DEPENDANT_OPERATORS_MANAGEMENT" \
     --test-dsc-management="$E2E_TEST_DSC_MANAGEMENT" \
     --test-operator-resilience="$E2E_TEST_OPERATOR_RESILIENCE" \
-    --test-operator-v2tov3upgrade="$E2E_TEST_OPERATOR_V2TOV3UPGRADE" \
     --test-webhook="$E2E_TEST_WEBHOOK" \
-    --test-conversion-webhook="$E2E_TEST_CONVERSION_WEBHOOK" \
-    --test-conversion-webhook-dsc="$E2E_TEST_CONVERSION_WEBHOOK_DSC" \
-    --test-conversion-webhook-platform="$E2E_TEST_CONVERSION_WEBHOOK_PLATFORM" \
-    --test-components="$E2E_TEST_COMPONENTS" \
-    --test-platform-orchestration="$E2E_TEST_PLATFORM_ORCHESTRATION" \
-    ${E2E_TEST_PLATFORM_COMPONENT:+--test-platform-component="$E2E_TEST_PLATFORM_COMPONENT"} \
+    --test-dag-ordering="$E2E_TEST_DAG_ORDERING" \
     --test-services="$E2E_TEST_SERVICES" \
     --operator-namespace="$E2E_TEST_OPERATOR_NAMESPACE" \
     --applications-namespace="$E2E_TEST_APPLICATIONS_NAMESPACE" \
@@ -206,22 +177,15 @@ else
   gotestsum --junitfile-project-name odh-operator-e2e \
     --junitfile "$raw_junit_report" --jsonfile "$raw_test_events" \
     --format standard-verbose --raw-command \
-    -- test2json -t -p e2e ./e2e-tests --test.run='^TestOdhOperator' --test.v=test2json --test.parallel=8 --test.timeout="$E2E_TEST_TIMEOUT" \
+    -- test2json -t -p e2e ./e2e-tests --test.run='^TestOdhOperator' --test.v=test2json --test.parallel=8 \
     --deletion-policy="$E2E_TEST_DELETION_POLICY" \
     --clean-up-previous-resources="$E2E_TEST_CLEAN_UP_PREVIOUS_RESOURCES" \
     --backup-and-restore-dsci-and-dsc="$E2E_TEST_BACKUP_AND_RESTORE_DSCI_AND_DSC" \
     --test-operator-controller="$E2E_TEST_OPERATOR_CONTROLLER" \
-    --test-dependant-operators-management="$E2E_TEST_DEPENDANT_OPERATORS_MANAGEMENT" \
     --test-dsc-management="$E2E_TEST_DSC_MANAGEMENT" \
     --test-operator-resilience="$E2E_TEST_OPERATOR_RESILIENCE" \
-    --test-operator-v2tov3upgrade="$E2E_TEST_OPERATOR_V2TOV3UPGRADE" \
     --test-webhook="$E2E_TEST_WEBHOOK" \
-    --test-conversion-webhook="$E2E_TEST_CONVERSION_WEBHOOK" \
-    --test-conversion-webhook-dsc="$E2E_TEST_CONVERSION_WEBHOOK_DSC" \
-    --test-conversion-webhook-platform="$E2E_TEST_CONVERSION_WEBHOOK_PLATFORM" \
-    --test-components="$E2E_TEST_COMPONENTS" \
-    --test-platform-orchestration="$E2E_TEST_PLATFORM_ORCHESTRATION" \
-    ${E2E_TEST_PLATFORM_COMPONENT:+--test-platform-component="$E2E_TEST_PLATFORM_COMPONENT"} \
+    --test-dag-ordering="$E2E_TEST_DAG_ORDERING" \
     --test-services="$E2E_TEST_SERVICES" \
     --operator-namespace="$E2E_TEST_OPERATOR_NAMESPACE" \
     --applications-namespace="$E2E_TEST_APPLICATIONS_NAMESPACE" \

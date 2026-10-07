@@ -53,7 +53,6 @@ and configure these applications.
     - [Running a Single E2E Test](#running-a-single-e2e-test)
     - [Change-to-Test Mapping](#change-to-test-mapping)
     - [E2E Tips/FAQ](#e2e-tipsfaq)
-      - [Alternative using E2E\_TEST\_FLAGS](#alternative-using-e2e_test_flags)
   - [Run Integration tests (Jenkins pipeline)](#run-integration-tests-jenkins-pipeline)
   - [Run Prometheus Unit Tests for Alerts](#run-prometheus-unit-tests-for-alerts)
   - [API Overview](#api-overview)
@@ -184,6 +183,7 @@ ODH operator can be configured both through flags and environment variables, her
 | DISABLE_DSC_CONFIG                                   | --disable-dsc-config        | Disable automatic creation of default DSCInitialization CR.                                                                                                                 | false         |
 | DEFAULT_MANIFESTS_PATH                               | --default-manifests-path    | Base path for component manifests.                                                                                                                                          |               |
 | ODH_PLATFORM_TYPE                                    | --platform-type             | Platform type override (OpenDataHub, ManagedRHOAI, SelfManagedRHOAI, XKS). Auto-detects if empty.                                                                          | (auto-detected) |
+| ODH_DAG_RUNLEVEL_TIMEOUT                             | --dag-runlevel-timeout      | Time a DAG runlevel may remain not ready before provisioning advances. A per-runlevel policy, when configured, takes precedence.                                           | 10m           |
 
 If both env variables and flags are set for the same configuration, flags values will be used.
 
@@ -594,10 +594,6 @@ metadata:
 spec: {}
 ```
 
-**WVA compatibility note:**
-
-The `spec.wva` field is deprecated and preserved only for backward compatibility. Workload Variant Autoscaler (WVA) is no longer supported, and the operator treats WVA as removed regardless of whether an existing resource previously set it to `Managed`.
-
 ### Test with customized manifests
 
 There are 2 ways to test your changes with modification:
@@ -707,6 +703,8 @@ spec:
       managementState: Managed
       nim:
         managementState: Managed
+      wva:
+        managementState: Removed
       rawDeploymentServiceConfig: Headed
     kueue:
       managementState: Removed
@@ -913,69 +911,54 @@ make e2e-test
 #### Configuring e2e Tests
 Evn vars can be set to configure e2e tests:
 
-| Configuration Env var                    | Description                                                                                                                                                                                                                | Default value                 |
-|------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------|
-| E2E_TEST_OPERATOR_NAMESPACE              | Namespace where the ODH operator is deployed.                                                                                                                                                                              | `opendatahub-operator-system` |
-| E2E_TEST_APPLICATIONS_NAMESPACE          | Namespace where the ODH applications are deployed.                                                                                                                                                                         | `opendatahub`                 |
-| E2E_TEST_WORKBENCHES_NAMESPACE           | Namespace where the workbenches are deployed.                                                                                                                                                                              | `opendatahub`                 |
-| E2E_TEST_DSC_MONITORING_NAMESPACE        | Namespace where the ODH monitoring is deployed.                                                                                                                                                                            | `opendatahub`                 |
-| E2E_TEST_DEPENDANT_OPERATORS_MANAGEMENT  | To configure the execution of tests related to the Dependant Operators management, this is useful to run e2e tests for an operator running out of the cluster i.e. for debugging purposes                                  | `true`                        |
-| E2E_TEST_DSC_MANAGEMENT                  | To configure the execution of DSCI/DSC management tests, this is useful to run e2e tests for an operator running out of the cluster i.e. for debugging purposes                                                            | `true`                        |
-| E2E_TEST_DSC_VALIDATION                  | To configure the execution of DSCI/DSC validation tests, this is useful to run e2e tests for an operator running in xKS cluster                                                                                            | `true`                        |
-| E2E_TEST_OPERATOR_CONTROLLER             | To configure the execution of tests related to the Operator POD, this is useful to run e2e tests for an operator running out of the cluster i.e. for debugging purposes                                                    | `true`                        |
-| E2E_TEST_OPERATOR_RESILIENCE             | To configure the execution of operator resilience tests, useful for testing operator fault tolerance scenarios                                                                                                             | `true`                        |
-| E2E_TEST_WEBHOOK                         | To configure the execution of tests related to the Operator WebHooks, this is useful to run e2e tests for an operator running out of the cluster i.e. for debugging purposes                                               | `true`                        |
-| E2E_TEST_CONVERSION_WEBHOOK              | Run conversion webhook scenarios. Defaults to `true` in full and targeted runs; set to `false` to disable them. DSC scenarios delete `default-dsc`. | `true` |
-| E2E_TEST_CONVERSION_WEBHOOK_DSC          | Include DSC conversion scenarios when the conversion suite runs. Set `false` to run only Platform conversion scenarios. | `true` |
-| E2E_TEST_CONVERSION_WEBHOOK_PLATFORM     | Include Platform conversion scenarios when the conversion suite runs. Set `false` to run only DSC conversion scenarios. | `true` |
-| E2E_TEST_DELETION_POLICY                 | Specify when to delete `DataScienceCluster`, `DSCInitialization`, and controllers. Valid options are: `always`, `on-failure`, and `never`.                                                                                 | `always`                      |
-| E2E_TEST_COMPONENTS                      | *(Deprecated)* Enable per-component tests (superseded by platform orchestration tests, remove once modularisation is complete)                                                                                             | `true`                        |
-| E2E_TEST_COMPONENT                       | *(Deprecated)* Filter per-component tests by name (superseded by `E2E_TEST_PLATFORM_COMPONENT`)                                                                                                                           | `all components`              |
-| E2E_TEST_PLATFORM_ORCHESTRATION          | Enable platform orchestration contract tests (module bootstrap, CR lifecycle, spec projection, status aggregation, resilience)                                                                                             | `true`                        |
-| E2E_TEST_PLATFORM_COMPONENT             | Filter platform orchestration tests to specific components (comma-separated, e.g. `dashboard,kserve`)                                                                                                                      | *(all)*                       |
-| E2E_TEST_SERVICES                        | Enable testing of individual services specified by --test-service flag                                                                                                                                                     | `true`                        |
-| E2E_TEST_SERVICE                         | A space separated configuration to control which services should be tested, by default all service specific test are executed                                                                                              | `all services`                |
-| E2E_AUTO_RESOLVE                         | When `true`, `make e2e-test` derives `E2E_TEST_COMPONENT`/`E2E_TEST_SERVICE` automatically from the PR's changed files (see [Path-based test scoping](docs/e2e-testing.md#path-based-test-scoping)), instead of running the full suite. The resolver always runs and logs its decision regardless of this flag, so its accuracy can be checked in job logs before enabling it. | `false`                       |
-| E2E_TEST_OPERATOR_V2TOV3UPGRADE          | To configure the execution of V2 to V3 upgrade tests, useful for testing V2 to V3 upgrade scenarios                                                                                                                        | `true`                        |
-| E2E_TEST_CLEAN_UP_PREVIOUS_RESOURCES     | To configure the cleaning-up of the previous resources in the cluster. This flag is quite useful to test custom scenarios, as well as running the tests after upgrade, to keep the previous DSC and test it.               | `true`                        |
-| E2E_TEST_BACKUP_AND_RESTORE_DSCI_AND_DSC | To back up DSCI/DSC at the beginning of the whole test suite and restore them at the end. Useful for testing custom scenarios, including removal of DSCI/DSC during the tests while keeping cluster in the original shape. | `false`                       |
-| E2E_TEST_CIRCUIT_BREAKER                 | Enable circuit breaker to halt tests on repeated infrastructure failures.                                                                                                                                                  | `true`                        |
-| E2E_TEST_CIRCUIT_BREAKER_THRESHOLD       | Consecutive infrastructure failures before health-checking for infrastructure problems.                                                                                                                                    | `3`                           |
-| E2E_TEST_TAG                             | Tag to run tests for. Options: `All`, `Smoke`, `Tier1`.                                                                                                                                                                    | `All`                         |
-| E2E_TEST_TIMEOUT                         | Timeout for the containerized E2E test binary, including conversion webhook scenarios.                                                                                                                                    | `110m`                        |
-| E2E_TEST_FLAGS                           | Alternatively the above configurations can be passed to e2e-tests as flags using this env var (see flags table below)                                                                                                      |                               |
-| SKIP_IMAGE_OVERRIDES                     | Skip auto-applying digest-pinned image overrides during `make deploy` and `make e2e-test`. Set to any value to disable.                                                                                                    | *(unset)*                     |
+| Configuration Env var                    | Description | Default value |
+|------------------------------------------|-------------|---------------|
+| E2E_TEST_OPERATOR_NAMESPACE              | Namespace where the ODH operator is deployed. | `opendatahub-operator-system` |
+| E2E_TEST_APPLICATIONS_NAMESPACE          | Namespace where the ODH applications are deployed. | `opendatahub` |
+| E2E_TEST_WORKBENCHES_NAMESPACE           | Legacy DSC workbench namespace value; operands deploy into the applications namespace. | `opendatahub` |
+| E2E_TEST_DSC_MONITORING_NAMESPACE        | Namespace where ODH monitoring is deployed. | `opendatahub` |
+| E2E_TEST_DSC_MANAGEMENT                  | Enable DSCI/DSC management tests. | `true` |
+| E2E_TEST_DSC_VALIDATION                  | Enable DSCI/DSC validation tests. | `true` |
+| E2E_TEST_OPERATOR_CONTROLLER             | Enable operator controller tests. | `true` |
+| E2E_TEST_OPERATOR_RESILIENCE             | Enable operator resilience tests. | `true` |
+| E2E_TEST_WEBHOOK                         | Enable operator webhook tests. | `true` |
+| E2E_TEST_DAG_ORDERING                    | Enable the OpenShift DAG ordering and registered-module contract suite. | `true` |
+| E2E_TEST_SERVICES                        | Enable service tests selected by `E2E_TEST_SERVICE`. | `true` |
+| E2E_TEST_SERVICE                         | Select service tests. Valid services are `auth` and `gateway`; both run by default. | `auth,gateway` |
+| E2E_AUTO_RESOLVE                         | When `true`, apply path-based selection to service tests. The DAG/module contract remains unfiltered and always covers every registered module when enabled. See [Path-based test scoping](docs/e2e-testing.md#path-based-test-scoping). | `false` |
+| E2E_TEST_DELETION_POLICY                 | Specify when to delete `DataScienceCluster`, `DSCInitialization`, and controllers: `always`, `on-failure`, or `never`. | `always` |
+| E2E_TEST_CLEAN_UP_PREVIOUS_RESOURCES     | Clean resources left by an earlier E2E run before starting. | `true` |
+| E2E_TEST_BACKUP_AND_RESTORE_DSCI_AND_DSC | Back up DSCI/DSC at suite start and restore them at the end. | `false` |
+| E2E_TEST_CIRCUIT_BREAKER                 | Halt tests after repeated infrastructure failures. | `true` |
+| E2E_TEST_CIRCUIT_BREAKER_THRESHOLD       | Consecutive failures before checking cluster health. | `3` |
+| E2E_TEST_TAG                             | Tag to run: `All`, `Smoke`, or `Tier1`. | `All` |
+| E2E_TEST_FLAGS                           | Pass the equivalent test CLI flags directly; see the table below. | *(unset)* |
+| SKIP_IMAGE_OVERRIDES                     | Skip auto-applying digest-pinned image overrides during `make deploy` and `make e2e-test`. | *(unset)* |
 
 Alternatively the above configurations can be passed to e2e-tests as flags by setting up `E2E_TEST_FLAGS` variable. Following table lists all the available flags:
 
-| Flag                                  | Description                                                                                                                                                                                                                | Default value                 |
-|---------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------|
-| --operator-namespace                  | Namespace where the ODH operator is deployed.                                                                                                                                                                              | `opendatahub-operator-system` |
-| --applications-namespace              | Namespace where the ODH applications are deployed.                                                                                                                                                                         | `opendatahub`                 |
-| --workbenches-namespace               | Namespace where the workbenches are deployed.                                                                                                                                                                              | `opendatahub`                 |
-| --dsc-monitoring-namespace            | Namespace where the ODH monitoring is deployed.                                                                                                                                                                            | `opendatahub`                 |
-| --test-dependant-operators-management | To configure the execution of tests related to the Dependant Operators management, this is useful to run e2e tests for an operator running out of the cluster i.e. for debugging purposes                                  | `true`                        |
-| --test-dsc-management                 | To configure the execution of DSCI/DSC management tests, this is useful to run e2e tests for an operator running out of the cluster i.e. for debugging purposes                                                            | `true`                        |
-| --test-dsc-validation                 | To configure the execution of DSCI/DSC validation tests, this is useful to run e2e tests for an operator running in xKS cluster                                                                                            | `true`                        |
-| --test-operator-controller            | To configure the execution of tests related to the Operator POD, this is useful to run e2e tests for an operator running out of the cluster i.e. for debugging purposes                                                    | `true`                        |
-| --test-operator-resilience            | To configure the execution of operator resilience tests, useful for testing operator fault tolerance scenarios                                                                                                             | `true`                        |
-| --test-webhook                        | To configure the execution of tests related to the Operator WebHooks, this is useful to run e2e tests for an operator running out of the cluster i.e. for debugging purposes                                               | `true`                        |
-| --test-conversion-webhook             | Explicitly include or exclude conversion webhook scenarios; when omitted, only full OpenShift `All`/`Tier3` suites include them. DSC scenarios delete `default-dsc`. | auto |
-| --test-conversion-webhook-dsc         | Include DSC conversion scenarios when the conversion suite runs. | `true` |
-| --test-conversion-webhook-platform    | Include Platform conversion scenarios when the conversion suite runs. | `true` |
-| --deletion-policy                     | Specify when to delete `DataScienceCluster`, `DSCInitialization`, and controllers. Valid options are: `always`, `on-failure`, and `never`.                                                                                 | `always`                      |
-| --test-components                     | *(Deprecated)* Enable per-component tests (superseded by platform orchestration tests, remove once modularisation is complete)                                                                                             | `true`                        |
-| --test-component                      | *(Deprecated)* Filter per-component tests by name (superseded by `--test-platform-component`)                                                                                                                              | `all components`              |
-| --test-platform-orchestration         | Enable platform orchestration contract tests (module bootstrap, CR lifecycle, spec projection, status aggregation, resilience)                                                                                             | `true`                        |
-| --test-platform-component            | Filter platform orchestration tests to specific components (comma-separated, e.g. `dashboard,kserve`)                                                                                                                      | *(all)*                       |
-| --test-services                       | Enable testing of individual services specified by --test-service flag                                                                                                                                                     | `true`                        |
-| --test-service                        | A repeatable (or comma separated no spaces) flag that control which services should be tested, by default all service specific test are executed                                                                           | `all services`                |
-| --test-operator-v2tov3upgrade         | To configure the execution of V2 to V3 upgrade tests, useful for testing V2 to V3 upgrade scenarios                                                                                                                        | `true`                        |
-| --clean-up-previous-resources         | To configure the cleaning-up of the previous resources in the cluster. This flag is quite useful to test custom scenarios, as well as running the tests after upgrade, to keep the previous DSC and test it.               | `true`                        |
-| --backup-and-restore-dsci-and-dsc     | To back up DSCI/DSC at the beginning of the whole test suite and restore them at the end. Useful for testing custom scenarios, including removal of DSCI/DSC during the tests while keeping cluster in the original shape. | `false`                       |
-| --circuit-breaker                     | Enable circuit breaker to halt tests on repeated infrastructure failures.                                                                                                                                                  | `true`                        |
-| --circuit-breaker-threshold           | Consecutive infrastructure failures before health-checking for infrastructure problems.                                                                                                                                    | `3`                           |
-| --tag                                 | Tag to run tests for. Options: `All`, `Smoke`, `Tier1`.                                                                                                                                                                    | `All`                         |
+| Flag | Description | Default value |
+|------|-------------|---------------|
+| --operator-namespace | Namespace where the ODH operator is deployed. | `opendatahub-operator-system` |
+| --applications-namespace | Namespace where the ODH applications are deployed. | `opendatahub` |
+| --workbenches-namespace | Legacy DSC workbench namespace value. | `opendatahub` |
+| --dsc-monitoring-namespace | Namespace where ODH monitoring is deployed. | `opendatahub` |
+| --test-dsc-management | Enable DSCI/DSC management tests. | `true` |
+| --test-dsc-validation | Enable DSCI/DSC validation tests. | `true` |
+| --test-operator-controller | Enable operator controller tests. | `true` |
+| --test-operator-resilience | Enable operator resilience tests. | `true` |
+| --test-webhook | Enable operator webhook tests. | `true` |
+| --test-dag-ordering | Enable the OpenShift DAG ordering and registered-module contract suite. | `true` |
+| --test-services | Enable service tests selected by `--test-service`. | `true` |
+| --test-service | Select `auth` and/or `gateway`; repeat the flag or use a comma-separated value. | `auth,gateway` |
+| --deletion-policy | Delete test resources `always`, `on-failure`, or `never`. | `always` |
+| --clean-up-previous-resources | Clean resources left by an earlier E2E run. | `true` |
+| --backup-and-restore-dsci-and-dsc | Back up DSCI/DSC at suite start and restore them at the end. | `false` |
+| --circuit-breaker | Halt tests after repeated infrastructure failures. | `true` |
+| --circuit-breaker-threshold | Consecutive failures before checking cluster health. | `3` |
+| --tag | Tag to run: `All`, `Smoke`, or `Tier1`. | `All` |
+
+The DAG suite temporarily sets `ODH_DAG_RUNLEVEL_TIMEOUT=5m` on the operator so upgrade-order timeout behavior can be exercised without waiting for the production default of 10 minutes. Initial module bootstrap is intentionally ungated when no platform release has been reported. The operator setting can also be supplied as `--dag-runlevel-timeout`.
 
 <details>
 <summary>Running E2E tests with custom application namespace</summary>
@@ -1006,28 +989,17 @@ Example command to run full test suite skipping the DataScienceCluster deletion 
 make e2e-test -e E2E_TEST_OPERATOR_NAMESPACE=<namespace> -e E2E_TEST_DELETION_POLICY=never
 ```
 
-Example commands to run test suite for the dashboard `component` only, with the operator running out of the cluster:
+Registered modules are not selected through per-component flags. On OpenShift, enabling `E2E_TEST_DAG_ORDERING` runs every production registration in DAG order and executes each module contract as an isolated child test. Monitoring participates in this suite as a DSCI-backed module.
+
+To run only the remaining service group, select Auth or Gateway and disable the DAG contract:
 
 ```shell
-make run-nowebhook
-```
-```shell
-make e2e-test -e E2E_TEST_OPERATOR_NAMESPACE=<namespace> -e E2E_TEST_OPERATOR_CONTROLLER=false -e E2E_TEST_WEBHOOK=false -e E2E_TEST_SERVICES=false -e E2E_TEST_COMPONENT=dashboard
-```
-
-Example commands to run test suite for the monitoring `service` only, with the operator running out of the cluster:
-
-```shell
-make run-nowebhook
-```
-```shell
-make e2e-test -e E2E_TEST_OPERATOR_NAMESPACE=<namespace> -e E2E_TEST_OPERATOR_CONTROLLER=false -e E2E_TEST_WEBHOOK=false -e E2E_TEST_COMPONENTS=false -e E2E_TEST_SERVICE=monitoring
+make e2e-test \
+  -e E2E_TEST_DAG_ORDERING=false \
+  -e E2E_TEST_SERVICE=gateway
 ```
 
-Example commands to run test suite excluding tests for ray `component`:
-```shell
-make e2e-test -e E2E_TEST_OPERATOR_NAMESPACE=<namespace> -e E2E_TEST_COMPONENT=!ray
-```
+Auth and Gateway are the only entries in the Services `TestGroup`; Monitoring is not a service test.
 
 #### Cluster Setup for E2E
 
@@ -1036,32 +1008,30 @@ Before running any single E2E test, DSCI and DSC resources must exist. Use this 
 make e2e-setup-cluster
 ```
 
-This runs `e2e-test` with component tests, webhook tests, services tests, resilience tests, upgrade tests, and hardware profile tests
-disabled, deletion policy set to `never`, and cleanup enabled. After setup completes, you can run individual
-component or service tests against the prepared cluster.
+This runs `e2e-test` with the DAG/module contract, webhook, service, and resilience groups disabled, deletion policy set to `never`, and cleanup enabled. After setup completes, individual DAG module paths or Auth/Gateway service tests can run against the prepared cluster.
 
 #### Running a Single E2E Test
 
-Use `e2e-test-single` to run a single test function by its full path. The test path follows the format
-`TestOdhOperator/<group>/<component-or-service>/<test-name>`:
+Use `e2e-test-single` with a full Go subtest path. Registered module checks are nested under the DAG convergence test by runlevel:
 
 ```shell
-# Run a single component test
-make e2e-test-single TEST="TestOdhOperator/Component_Tests/dashboard/Validate component enabled"
+# Run the Dashboard module contract at runlevel 20
+make e2e-test-single TEST="TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"
 
-# Run a single service test
-make e2e-test-single TEST="TestOdhOperator/Service_Tests/monitoring/Validate.*Prometheus"
+# Run the Monitoring DSCI-backed module contract at runlevel 20
+make e2e-test-single TEST="TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/monitoring"
 
-# Run a single test matching a pattern (regex supported)
-make e2e-test-single TEST="TestOdhOperator/Component_Tests/mlflowoperator/Validate update operand resources"
+# Run an Auth or Gateway service test
+make e2e-test-single TEST="TestOdhOperator/services/auth"
 ```
+
+The same path can be passed directly to `go test` when a longer suite timeout is needed:
 
 ```shell
-go test -v -run "TestOdhOperator/Component_Tests/dashboard/Validate component enabled" ./tests/e2e/ --timeout=15m
+go test -v -run "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve" ./tests/e2e/ -timeout=60m
 ```
 
-**Note:** `e2e-test-single` does **not** create DSCI/DSC or handle component dependencies. Ensure prerequisites
-exist before running (see [Cluster Setup for E2E](#cluster-setup-for-e2e)).
+**Note:** Filtering to a module child path still runs the parent DAG setup and convergence flow. `e2e-test-single` does **not** create DSCI/DSC; prepare the cluster first with [Cluster Setup for E2E](#cluster-setup-for-e2e).
 
 Additionally specific env vars can be used to configure tests timeouts
 
@@ -1080,32 +1050,16 @@ Quick reference: "I changed code in directory X — which E2E test(s) should I r
 
 | What You Changed | Pre-Test Steps | E2E Test Command |
 |---|---|---|
-| `internal/controller/components/<comp>/` | None | `make e2e-test -e E2E_TEST_COMPONENT=<comp>` |
-| `internal/controller/services/<svc>/` | None | `make e2e-test -e E2E_TEST_SERVICE=<svc>` |
-| `api/components/v1alpha1/<comp>_types.go` | `make generate manifests api-docs` | `make e2e-test -e E2E_TEST_COMPONENT=<comp>` |
-| `api/datasciencecluster/`, `api/dscinitialization/` | `make generate manifests api-docs` | `make e2e-test` (full suite) |
-| `internal/controller/datasciencecluster/` or `dscinitialization/` | None | `make e2e-test` (full suite) |
-| `pkg/`, `config/`, `cmd/main.go` | None | `make e2e-test` (full suite) |
-| `opt/manifests/<comp>/` | None | `make e2e-test -e E2E_TEST_COMPONENT=<comp>` |
+| `internal/controller/modules/<module>/` | None | `make e2e-test` (all registered module contracts run in DAG order) |
+| `internal/controller/modules/monitoring/` or DSCI monitoring API | Run required code generation for API changes | `make e2e-test` (Monitoring is a DSCI-backed module) |
+| `internal/controller/modules/builtin/`, `pkg/controller/dag/`, or module registration/runlevel metadata | None | `make e2e-test` |
+| `internal/controller/services/auth/` | None | `make e2e-test -e E2E_TEST_DAG_ORDERING=false -e E2E_TEST_SERVICE=auth` |
+| `internal/controller/services/gateway/` | None | `make e2e-test -e E2E_TEST_DAG_ORDERING=false -e E2E_TEST_SERVICE=gateway` |
+| `api/datasciencecluster/`, `api/dscinitialization/` | `make generate manifests api-docs` | `make e2e-test` |
+| `internal/controller/datasciencecluster/`, `internal/controller/dscinitialization/`, `pkg/`, `config/`, or `cmd/main.go` | None | `make e2e-test` |
+| Module operator manifests under `opt/manifests/` or `opt/charts/` | None | `make e2e-test` |
 
-**Components with dependencies** — include dependencies in `E2E_TEST_COMPONENT`:
-
-| Component | Dependencies | E2E Command |
-|---|---|---|
-| kueue | workbenches | `make e2e-test -e E2E_TEST_COMPONENT="workbenches kueue"` |
-| modelcontroller | kserve, aihub | `make e2e-test -e E2E_TEST_COMPONENT="kserve aihub modelcontroller"` |
-| modelsasservice | kserve | `make e2e-test -e E2E_TEST_COMPONENT="kserve modelsasservice"` |
-| trustyai | kserve | `make e2e-test -e E2E_TEST_COMPONENT="kserve trustyai"` |
-
-**Webhook directory mapping** — webhook dirs don't always match their component:
-
-| Webhook Directory | Test Command |
-|---|---|
-| `webhook/serving/` | `E2E_TEST_COMPONENT=kserve` |
-| `webhook/kueue/` | `E2E_TEST_COMPONENT="workbenches kueue"` |
-| `webhook/dashboard/` | `E2E_TEST_COMPONENT=dashboard` |
-| `webhook/monitoring/` | `E2E_TEST_SERVICE=monitoring` |
-| `webhook/datasciencecluster/`, `webhook/dscinitialization/` | `make e2e-test` (full suite) |
+There is no component dependency-selection table: production runlevels and dependencies come from the registered DAG, and the OpenShift contract always evaluates the complete registration set.
 
 #### E2E Tips/FAQ
 
@@ -1145,26 +1099,26 @@ make e2e-test  # include other args as needed
 </details>
 
 <details>
-<summary>How do I run only tests for core services (monitoring, etc)?</summary>
+<summary>How do I run only Auth or Gateway service tests?</summary>
 
 ```shell
-make e2e-test -e E2E_TEST_OPERATOR_CONTROLLER=false -e E2E_TEST_WEBHOOK=false -e E2E_TEST_COMPONENTS=false -e E2E_TEST_SERVICES=true -e E2E_TEST_DELETION_POLICY=never
+make e2e-test -e E2E_TEST_DAG_ORDERING=false -e E2E_TEST_SERVICES=true -e E2E_TEST_SERVICE="auth,gateway" -e E2E_TEST_DELETION_POLICY=never
 ```
+
+Monitoring is covered by the DSCI-backed module contract, not the Services `TestGroup`.
 
 </details>
 
 <details>
-<summary>How do I run only tests for a specific component?</summary>
+<summary>How do I run a specific registered module contract?</summary>
+
+Run its child path under the DAG convergence test. For example:
 
 ```shell
-make e2e-test -e E2E_TEST_OPERATOR_CONTROLLER=false -e E2E_TEST_WEBHOOK=false -e E2E_TEST_COMPONENT="dashboard workbenches" -e E2E_TEST_SERVICES=false -e E2E_TEST_DELETION_POLICY=never
+make e2e-test-single TEST="TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/workbenches"
 ```
 
-##### Alternative using E2E\_TEST\_FLAGS
-
-```shell
-make e2e-test -e E2E_TEST_FLAGS="--test-operator-controller=false --test-webhook=false --test-component=dashboard,workbenches --test-services=false --deletion-policy=never"
-```
+There is no `E2E_TEST_COMPONENT` selector. To disable or enable the complete contract with `E2E_TEST_FLAGS`, use `--test-dag-ordering=false` or `--test-dag-ordering=true`.
 
 </details>
 
@@ -1174,8 +1128,8 @@ make e2e-test -e E2E_TEST_FLAGS="--test-operator-controller=false --test-webhook
 Use the `e2e-test-single` target:
 
 ```shell
-make e2e-test-single TEST="TestOdhOperator/Component_Tests/dashboard/Validate component enabled"
-make e2e-test-single TEST="TestOdhOperator/Service_Tests/monitoring/Validate.*Prometheus"
+make e2e-test-single TEST="TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"
+make e2e-test-single TEST="TestOdhOperator/services/gateway"
 ```
 
 

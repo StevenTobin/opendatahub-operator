@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  annotations:
+    platform.opendatahub.io/managed-by: opendatahub-operator
+  creationTimestamp: "2026-10-07T10:40:50Z"
+  name: odh-upgrade-acks
+  namespace: redhat-ods-operator
+  resourceVersion: "40718"
+  uid: 454b48e4-3e85-45fe-9f01-853fc85c8e21

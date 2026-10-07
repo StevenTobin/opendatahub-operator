@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
+	componentApi "github.com/opendatahub-io/opendatahub-operator/v2/api/components/v1alpha1"
 	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/services/gateway"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster/gvk"
@@ -33,6 +34,12 @@ func (tc *GatewayTestCtx) DashboardRedirectTestSuite(t *testing.T) {
 	// Dashboard CR must exist for redirect resources to be created.
 	// The gateway reconciler checks for the Dashboard CR and cleans up redirect
 	// resources when it is absent.
+	t.Cleanup(func() {
+		tc.EventuallyResourcePatched(
+			WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
+			WithMutateFunc(testf.Transform(`.spec.components.dashboard.standard.managementState = "Removed"`)),
+		)
+	})
 	tc.ensureDashboardCRExists(t)
 
 	testCases := []TestCase{
@@ -60,7 +67,7 @@ func (tc *GatewayTestCtx) ensureDashboardCRExists(t *testing.T) {
 	)
 
 	tc.EnsureResourceExists(
-		WithMinimalObject(gvk.Dashboard, types.NamespacedName{Name: "default-dashboard"}),
+		WithMinimalObject(gvk.Dashboard, types.NamespacedName{Name: componentApi.DashboardInstanceName}),
 	)
 	t.Logf("Dashboard CR exists; redirect resources can now be created by gateway reconciler")
 }

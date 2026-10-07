@@ -32,7 +32,11 @@ func TestNewE2ETestRunner(t *testing.T) {
 func TestBuildSkipFilter(t *testing.T) {
 	defaultOpts := types.E2ETestOptions{
 		NeverSkipPrefixes: []string{"TestOdhOperator/DSCInitialization_and_DataScienceCluster_management_E2E_Tests"},
-		SkipAtPrefixes:    []string{"TestOdhOperator/services/", "TestOdhOperator/components/", "TestOdhOperator/"},
+		SkipAtPrefixes: []string{
+			"TestOdhOperator/services/",
+			"TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/*/",
+			"TestOdhOperator/",
+		},
 	}
 
 	tests := []struct {
@@ -79,15 +83,26 @@ func TestBuildSkipFilter(t *testing.T) {
 			expected: "^TestOdhOperator$/^services$|^TestOdhOperator$/^services$/^auth$",
 		},
 		{
-			name: "component test - should use third level",
+			name: "unconfigured nested suite uses root fallback",
 			opts: defaultOpts,
 			aggregatedTestResult: &types.TestResult{PassedTest: []types.TestCase{
 				{Name: "TestOdhOperator"},
-				{Name: "TestOdhOperator/components"},
-				{Name: "TestOdhOperator/components/dashboard"},
-				{Name: "TestOdhOperator/components/dashboard/subtest"},
+				{Name: "TestOdhOperator/arbitrary_suite"},
+				{Name: "TestOdhOperator/arbitrary_suite/alpha"},
+				{Name: "TestOdhOperator/arbitrary_suite/alpha/subtest"},
 			}},
-			expected: "^TestOdhOperator$/^components$|^TestOdhOperator$/^components$/^dashboard$",
+			expected: "^TestOdhOperator$/^arbitrary_suite$",
+		},
+		{
+			name: "DAG module contract test uses module level within each runlevel",
+			opts: defaultOpts,
+			aggregatedTestResult: &types.TestResult{PassedTest: []types.TestCase{
+				{Name: "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"},
+				{Name: "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard/Bootstrap:_module_CR_created_when_enabled"},
+				{Name: "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve"},
+				{Name: "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve/Lifecycle:_module_CR_owned_by_orchestrator"},
+			}},
+			expected: "^TestOdhOperator$/^DAG_Ordering_E2E_Tests$/^Validate_runlevel_gating_and_convergence$/^Runlevel_20_module_contracts$/^dashboard$|^TestOdhOperator$/^DAG_Ordering_E2E_Tests$/^Validate_runlevel_gating_and_convergence$/^Runlevel_31_module_contracts$/^kserve$",
 		},
 		{
 			name: "dsc initialization test - should not be skipped",
@@ -100,19 +115,16 @@ func TestBuildSkipFilter(t *testing.T) {
 			expected: "",
 		},
 		{
-			name: "mix of service and component tests",
+			name: "mix of service and DAG module contract tests",
 			opts: defaultOpts,
 			aggregatedTestResult: &types.TestResult{PassedTest: []types.TestCase{
-				{Name: "TestOdhOperator"},
 				{Name: "TestOdhOperator/services"},
 				{Name: "TestOdhOperator/services/auth"},
 				{Name: "TestOdhOperator/services/auth/subtest1"},
-				{Name: "TestOdhOperator/services/auth/subtest2"},
-				{Name: "TestOdhOperator/components"},
-				{Name: "TestOdhOperator/components/dashboard"},
-				{Name: "TestOdhOperator/components/dashboard/subtest"},
+				{Name: "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"},
+				{Name: "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard/Bootstrap:_module_CR_created_when_enabled"},
 			}},
-			expected: "^TestOdhOperator$/^components$|^TestOdhOperator$/^components$/^dashboard$|^TestOdhOperator$/^services$|^TestOdhOperator$/^services$/^auth$",
+			expected: "^TestOdhOperator$/^DAG_Ordering_E2E_Tests$/^Validate_runlevel_gating_and_convergence$/^Runlevel_20_module_contracts$/^dashboard$|^TestOdhOperator$/^services$|^TestOdhOperator$/^services$/^auth$",
 		},
 		{
 			name: "test with special regex characters",
@@ -217,121 +229,81 @@ func TestBuildSkipFilter(t *testing.T) {
 			expected: "^TestOdhOperator$/^services$/^auth$",
 		},
 		{
-			name: "with different order tests and fail fast",
+			name: "DAG modules with different order and fail fast",
 			opts: defaultOpts,
 			aggregatedTestResult: &types.TestResult{
 				PassedTest: []types.TestCase{
-					{Name: "TestOdhOperator/components/component1"},                     // first run
-					{Name: "TestOdhOperator/components/component_fail_consistently/t1"}, // first run
+					{Name: "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"},
+					{Name: "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve/contract1"},
 				},
-				// Just to reference the failed tests for a case like this one
+				// Failed results do not prevent a module that later passed as a unit from being skipped.
 				FailedTest: []types.TestCase{
-					{Name: "TestOdhOperator"},                                           // first run
-					{Name: "TestOdhOperator/components"},                                // first run
-					{Name: "TestOdhOperator/components/component_fail_consistently"},    // first run
-					{Name: "TestOdhOperator/components/component_fail_consistently/t2"}, // first run
-					{Name: "TestOdhOperator"},                                           // second run
-					{Name: "TestOdhOperator/components"},                                // second run
-					{Name: "TestOdhOperator/components/component3"},                     // second run
+					{Name: "TestOdhOperator"},
+					{Name: "TestOdhOperator/DAG_Ordering_E2E_Tests"},
+					{Name: "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve"},
+					{Name: "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve/contract2"},
 				},
 			},
-			expected: "^TestOdhOperator$/^components$/^component1$",
+			expected: "^TestOdhOperator$/^DAG_Ordering_E2E_Tests$/^Validate_runlevel_gating_and_convergence$/^Runlevel_20_module_contracts$/^dashboard$",
 		},
 		{
-			name: "components with sub groups",
+			name: "custom wildcard prefix with nested groups",
 			opts: types.E2ETestOptions{
-				SkipAtPrefixes: []string{"TestOdhOperator/components/*/", "TestOdhOperator/"},
+				SkipAtPrefixes: []string{"TestOdhOperator/suite_a/*/", "TestOdhOperator/"},
 			},
 			aggregatedTestResult: &types.TestResult{PassedTest: []types.TestCase{
-				{Name: "TestOdhOperator/components/group_1/dashboard"},
-				{Name: "TestOdhOperator/components/group_1/dashboard/subtest1"},
-				{Name: "TestOdhOperator/components/group_1/dashboard/subtest2"},
-				{Name: "TestOdhOperator/components/group_1/kueue/subtest1"},
-				{Name: "TestOdhOperator/components/group_1/kueue/subtest2"},
-				{Name: "TestOdhOperator/components/group_2/kserve"},
-				{Name: "TestOdhOperator/components/group_2/kserve/subtest1"},
-				{Name: "TestOdhOperator/components/group_2/kserve/subtest2"},
-				{Name: "TestOdhOperator/components/group_3"},
-				{Name: "TestOdhOperator/components/group_3/trustyai"},
-				{Name: "TestOdhOperator/components/group_3/trustyai/subtest1"},
-				{Name: "TestOdhOperator/components/group_3/trustyai/subtest2"},
+				{Name: "TestOdhOperator/suite_a/group_1/alpha"},
+				{Name: "TestOdhOperator/suite_a/group_1/alpha/subtest1"},
+				{Name: "TestOdhOperator/suite_a/group_1/alpha/subtest2"},
+				{Name: "TestOdhOperator/suite_a/group_1/beta/subtest1"},
+				{Name: "TestOdhOperator/suite_a/group_1/beta/subtest2"},
+				{Name: "TestOdhOperator/suite_a/group_2/gamma"},
+				{Name: "TestOdhOperator/suite_a/group_2/gamma/subtest1"},
+				{Name: "TestOdhOperator/suite_a/group_2/gamma/subtest2"},
+				{Name: "TestOdhOperator/suite_a/group_3"},
+				{Name: "TestOdhOperator/suite_a/group_3/delta"},
+				{Name: "TestOdhOperator/suite_a/group_3/delta/subtest1"},
+				{Name: "TestOdhOperator/suite_a/group_3/delta/subtest2"},
 			}},
-			expected: "^TestOdhOperator$/^components$/^group_1$/^dashboard$|^TestOdhOperator$/^components$/^group_2$/^kserve$|^TestOdhOperator$/^components$/^group_3$|^TestOdhOperator$/^components$/^group_3$/^trustyai$",
+			expected: "^TestOdhOperator$/^suite_a$/^group_1$/^alpha$|^TestOdhOperator$/^suite_a$/^group_2$/^gamma$|^TestOdhOperator$/^suite_a$/^group_3$|^TestOdhOperator$/^suite_a$/^group_3$/^delta$",
 		},
 		{
-			name: "only components skipped",
+			name: "custom prefix without trailing slash",
 			opts: types.E2ETestOptions{
-				SkipAtPrefixes: []string{"TestOdhOperator/components"},
+				SkipAtPrefixes: []string{"TestOdhOperator/suite_a"},
 			},
 			aggregatedTestResult: &types.TestResult{PassedTest: []types.TestCase{
 				{Name: "TestOdhOperator"},
-				{Name: "TestOdhOperator/components"},
-				{Name: "TestOdhOperator/components/dashboard"},
-				{Name: "TestOdhOperator/components/dashboard/subtest"},
+				{Name: "TestOdhOperator/suite_a"},
+				{Name: "TestOdhOperator/suite_a/alpha"},
+				{Name: "TestOdhOperator/suite_a/alpha/subtest"},
 			}},
-			expected: "^TestOdhOperator$/^components$|^TestOdhOperator$/^components$/^dashboard$",
+			expected: "^TestOdhOperator$/^suite_a$|^TestOdhOperator$/^suite_a$/^alpha$",
 		},
 		{
-			name: "wildcard not in the end of the prefix",
+			name: "wildcard not at the end of the prefix",
 			opts: types.E2ETestOptions{
 				SkipAtPrefixes: []string{"TestOdhOperator/*/group_1"},
 			},
 			aggregatedTestResult: &types.TestResult{PassedTest: []types.TestCase{
-				{Name: "TestOdhOperator/components/group_1/dashboard"},
-				{Name: "TestOdhOperator/components/group_1/dashboard/subtest1"},
-				{Name: "TestOdhOperator/components/group_1/dashboard/subtest2"},
-				{Name: "TestOdhOperator/components/group_1/kueue/subtest1"},
-				{Name: "TestOdhOperator/components/group_1/kueue/subtest2"},
-				{Name: "TestOdhOperator/components/group_2"},
-				{Name: "TestOdhOperator/components/group_2/kserve"},
-				{Name: "TestOdhOperator/components/group_2/kserve/subtest1"},
-				{Name: "TestOdhOperator/services/group_1/auth"},
-				{Name: "TestOdhOperator/services/group_1/auth/subtest1"},
-				{Name: "TestOdhOperator/services/group_1/auth/subtest2"},
-				{Name: "TestOdhOperator/services/group_1/monitoring/subtest1"},
-				{Name: "TestOdhOperator/services/group_1/monitoring/subtest2"},
-				{Name: "TestOdhOperator/components/group_2"},
-				{Name: "TestOdhOperator/components/group_2/gateway"},
-				{Name: "TestOdhOperator/components/group_2/gateway/subtest1"},
+				{Name: "TestOdhOperator/suite_a/group_1/alpha"},
+				{Name: "TestOdhOperator/suite_a/group_1/alpha/subtest1"},
+				{Name: "TestOdhOperator/suite_a/group_1/alpha/subtest2"},
+				{Name: "TestOdhOperator/suite_a/group_1/beta/subtest1"},
+				{Name: "TestOdhOperator/suite_a/group_1/beta/subtest2"},
+				{Name: "TestOdhOperator/suite_a/group_2"},
+				{Name: "TestOdhOperator/suite_a/group_2/gamma"},
+				{Name: "TestOdhOperator/suite_a/group_2/gamma/subtest1"},
+				{Name: "TestOdhOperator/suite_b/group_1/delta"},
+				{Name: "TestOdhOperator/suite_b/group_1/delta/subtest1"},
+				{Name: "TestOdhOperator/suite_b/group_1/delta/subtest2"},
+				{Name: "TestOdhOperator/suite_b/group_1/epsilon/subtest1"},
+				{Name: "TestOdhOperator/suite_b/group_1/epsilon/subtest2"},
+				{Name: "TestOdhOperator/suite_a/group_2"},
+				{Name: "TestOdhOperator/suite_a/group_2/zeta"},
+				{Name: "TestOdhOperator/suite_a/group_2/zeta/subtest1"},
 			}},
-			expected: "^TestOdhOperator$/^components$/^group_1$/^dashboard$|^TestOdhOperator$/^services$/^group_1$/^auth$",
-		},
-		{
-			name: "monitoring-specific pattern for group level extraction",
-			opts: types.E2ETestOptions{
-				SkipAtPrefixes: []string{
-					"TestOdhOperator/monitoring/",
-					"TestOdhOperator/",
-				},
-			},
-			aggregatedTestResult: &types.TestResult{PassedTest: []types.TestCase{
-				{Name: "TestOdhOperator/monitoring/Group 1: Base Configuration"},
-				{Name: "TestOdhOperator/monitoring/Group 1: Base Configuration/Auto creation of Monitoring CR"},
-				{Name: "TestOdhOperator/monitoring/Group 1: Base Configuration/Test Monitoring CR content default value"},
-				{Name: "TestOdhOperator/monitoring/Group 2: Metrics & MonitoringStack"},
-				{Name: "TestOdhOperator/monitoring/Group 2: Metrics & MonitoringStack/Test Metrics MonitoringStack CR Creation"},
-				{Name: "TestOdhOperator/monitoring/Group 2: Metrics & MonitoringStack/Test Metrics MonitoringStack CR Configuration"},
-			}},
-			expected: "^TestOdhOperator$/^monitoring$/^Group 1: Base Configuration$|^TestOdhOperator$/^monitoring$/^Group 2: Metrics & MonitoringStack$",
-		},
-		{
-			name: "monitoring-specific pattern with mixed monitoring and other service tests",
-			opts: types.E2ETestOptions{
-				SkipAtPrefixes: []string{
-					"TestOdhOperator/monitoring/",
-					"TestOdhOperator/services/*/",
-					"TestOdhOperator/",
-				},
-			},
-			aggregatedTestResult: &types.TestResult{PassedTest: []types.TestCase{
-				{Name: "TestOdhOperator/monitoring/Group 1: Base Configuration"},
-				{Name: "TestOdhOperator/monitoring/Group 1: Base Configuration/Test A"},
-				{Name: "TestOdhOperator/services/group 1/auth"},
-				{Name: "TestOdhOperator/services/group 1/auth/Test B"},
-				{Name: "TestOdhOperator/services/group 1/gateway"},
-				{Name: "TestOdhOperator/services/group 1/gateway/Test C"},
-			}},
-			expected: "^TestOdhOperator$/^monitoring$/^Group 1: Base Configuration$|^TestOdhOperator$/^services$/^group 1$/^auth$|^TestOdhOperator$/^services$/^group 1$/^gateway$",
+			expected: "^TestOdhOperator$/^suite_a$/^group_1$/^alpha$|^TestOdhOperator$/^suite_b$/^group_1$/^delta$",
 		},
 		{
 			name: "monitoring-specific pattern takes precedence over general pattern",
@@ -365,7 +337,11 @@ func TestBuildSkipFilter(t *testing.T) {
 func TestExtractTestLevel(t *testing.T) {
 	defaultOpts := types.E2ETestOptions{
 		NeverSkipPrefixes: []string{"TestOdhOperator/DSCInitialization_and_DataScienceCluster_management_E2E_Tests"},
-		SkipAtPrefixes:    []string{"TestOdhOperator/services/", "TestOdhOperator/components/", "TestOdhOperator/"},
+		SkipAtPrefixes: []string{
+			"TestOdhOperator/services/",
+			"TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/*/",
+			"TestOdhOperator/",
+		},
 	}
 
 	tests := []struct {
@@ -404,17 +380,31 @@ func TestExtractTestLevel(t *testing.T) {
 			shouldSkip: true,
 		},
 		{
-			name:       "component test with subtest",
+			name:       "unconfigured nested suite uses root fallback",
 			opts:       defaultOpts,
-			testName:   "TestOdhOperator/components/dashboard/subtest",
-			wantLevel:  "TestOdhOperator/components/dashboard",
+			testName:   "TestOdhOperator/arbitrary_suite/alpha/subtest",
+			wantLevel:  "TestOdhOperator/arbitrary_suite",
 			shouldSkip: true,
 		},
 		{
-			name:       "component test without subtest",
+			name:       "DAG module contract test with subtest",
 			opts:       defaultOpts,
-			testName:   "TestOdhOperator/components/dashboard",
-			wantLevel:  "TestOdhOperator/components/dashboard",
+			testName:   "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard/Bootstrap:_module_CR_created_when_enabled",
+			wantLevel:  "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard",
+			shouldSkip: true,
+		},
+		{
+			name:       "DAG module contract test without subtest",
+			opts:       defaultOpts,
+			testName:   "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve",
+			wantLevel:  "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve",
+			shouldSkip: true,
+		},
+		{
+			name:       "other ordered DAG scenarios use root fallback",
+			opts:       defaultOpts,
+			testName:   "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_partial_enablement/subtest",
+			wantLevel:  "TestOdhOperator/DAG_Ordering_E2E_Tests",
 			shouldSkip: true,
 		},
 		{
@@ -446,14 +436,14 @@ func TestExtractTestLevel(t *testing.T) {
 			shouldSkip: true,
 		},
 		{
-			name:       "component test with deep nesting",
+			name:       "DAG module contract test with deep nesting",
 			opts:       defaultOpts,
-			testName:   "TestOdhOperator/components/dashboard/subtest1/subtest2",
-			wantLevel:  "TestOdhOperator/components/dashboard",
+			testName:   "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve/lifecycle/delete/recreate",
+			wantLevel:  "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve",
 			shouldSkip: true,
 		},
 		{
-			name:       "non-service/component three-level test",
+			name:       "generic three-level test",
 			opts:       defaultOpts,
 			testName:   "TestOdhOperator/other/something",
 			wantLevel:  "TestOdhOperator/other",
@@ -643,7 +633,7 @@ func TestExportJUnitBestEffort(t *testing.T) {
 		runner := &E2ETestRunner{opts: types.E2ETestOptions{JUnitOutputPath: out}}
 
 		runner.exportJUnitBestEffort(&types.TestResult{
-			PassedTest: []types.TestCase{{Name: "TestOdhOperator/components/dashboard"}},
+			PassedTest: []types.TestCase{{Name: "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"}},
 			FailedTest: []types.TestCase{{Name: "TestOdhOperator/services/monitoring", FailureOutput: "timed out"}},
 		}, "partial failure")
 
@@ -655,7 +645,7 @@ func TestExportJUnitBestEffort(t *testing.T) {
 		for _, tc := range suite.TestCases {
 			names = append(names, tc.Name)
 		}
-		require.Contains(t, names, "TestOdhOperator/components/dashboard")
+		require.Contains(t, names, "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard")
 		require.Contains(t, names, "TestOdhOperator/services/monitoring")
 	})
 }

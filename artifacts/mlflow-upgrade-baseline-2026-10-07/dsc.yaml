@@ -1,0 +1,204 @@
+apiVersion: datasciencecluster.opendatahub.io/v2
+kind: DataScienceCluster
+metadata:
+  annotations:
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"datasciencecluster.opendatahub.io/v2","kind":"DataScienceCluster","metadata":{"annotations":{},"name":"default-dsc"},"spec":{"components":{"mlflowoperator":{"managementState":"Managed"}}}}
+  creationTimestamp: "2026-10-07T10:40:49Z"
+  generation: 1
+  name: default-dsc
+  resourceVersion: "40850"
+  uid: 90f0508f-ebc0-4eaf-ba41-7b4690ffd3aa
+spec:
+  components:
+    mlflowoperator:
+      managementState: Managed
+status:
+  components:
+    aigateway:
+      managementState: Removed
+    aipipelines:
+      managementState: Removed
+    batchGateway:
+      managementState: Removed
+    dashboard:
+      managementState: Removed
+    feastoperator:
+      managementState: Removed
+    kserve:
+      managementState: Removed
+    kueue:
+      managementState: Removed
+    llamastackoperator: {}
+    mcplifecycleoperator:
+      managementState: Removed
+    mlflowoperator:
+      managementState: Managed
+      releases:
+      - name: platform
+        version: 3.5.1
+      - name: MLflow
+        repoUrl: https://github.com/mlflow/mlflow
+        version: 3.14.0
+    modelregistry:
+      managementState: Removed
+    modelsAsAService:
+      managementState: Removed
+    ogx:
+      managementState: Removed
+    ray:
+      managementState: Removed
+    sparkoperator:
+      managementState: Removed
+    trainer:
+      managementState: Removed
+    trainingoperator:
+      managementState: Removed
+    trustyai:
+      managementState: Removed
+    workbenches:
+      managementState: Removed
+  conditions:
+  - lastTransitionTime: "2026-10-07T10:40:54Z"
+    status: "True"
+    type: Ready
+  - lastTransitionTime: "2026-10-07T10:40:51Z"
+    observedGeneration: 1
+    status: "True"
+    type: ProvisioningSucceeded
+  - lastTransitionTime: "2026-10-07T10:40:51Z"
+    message: All registered components have ManagementState Removed or are not configured
+    reason: NoManagedComponents
+    severity: Info
+    status: "True"
+    type: ComponentsReady
+  - lastTransitionTime: "2026-10-07T10:40:54Z"
+    status: "True"
+    type: ModulesReady
+  - lastTransitionTime: "2026-10-07T10:40:51Z"
+    message: Module ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: AIGatewayReady
+  - lastTransitionTime: "2026-10-07T10:40:54Z"
+    message: Component ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: AIPipelinesReady
+  - lastTransitionTime: "2026-10-07T10:40:51Z"
+    message: Submodule ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: BatchGatewayReady
+  - lastTransitionTime: "2026-10-07T10:40:51Z"
+    message: Module ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: DashboardReady
+  - lastTransitionTime: "2026-10-07T10:40:51Z"
+    message: Module ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: FeastOperatorReady
+  - lastTransitionTime: "2026-10-07T10:40:51Z"
+    message: Submodule ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: KserveLLMInferenceServiceDependencies
+  - lastTransitionTime: "2026-10-07T10:40:51Z"
+    message: Submodule ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: KserveLLMInferenceServiceWideEPDependencies
+  - lastTransitionTime: "2026-10-07T10:40:51Z"
+    message: Module ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: KserveReady
+  - lastTransitionTime: "2026-10-07T10:40:54Z"
+    message: Component ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: KueueReady
+  - lastTransitionTime: "2026-10-07T10:40:51Z"
+    message: Module ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: MCPLifecycleOperatorReady
+  - lastTransitionTime: "2026-10-07T10:40:54Z"
+    message: MLflowOperator is ready to manage MLflow custom resources
+    reason: Ready
+    status: "True"
+    type: MLflowOperatorReady
+  - lastTransitionTime: "2026-10-07T10:40:54Z"
+    message: Component ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: ModelRegistryReady
+  - lastTransitionTime: "2026-10-07T10:40:51Z"
+    message: Submodule ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: ModelsAsAServiceReady
+  - lastTransitionTime: "2026-10-07T10:40:51Z"
+    message: Module ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: OGXReady
+  - lastTransitionTime: "2026-10-07T10:40:51Z"
+    status: "True"
+    type: ProvisioningProgress
+  - lastTransitionTime: "2026-10-07T10:40:54Z"
+    message: Component ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: RayReady
+  - lastTransitionTime: "2026-10-07T10:40:54Z"
+    message: Component ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: SparkOperatorReady
+  - lastTransitionTime: "2026-10-07T10:40:54Z"
+    message: Component ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: TrainerReady
+  - lastTransitionTime: "2026-10-07T10:40:54Z"
+    message: Component ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: TrainingOperatorReady
+  - lastTransitionTime: "2026-10-07T10:40:54Z"
+    message: Component ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: TrustyAIReady
+  - lastTransitionTime: "2026-10-07T10:40:51Z"
+    message: Module ManagementState is set to Removed
+    reason: Removed
+    severity: Info
+    status: "False"
+    type: WorkbenchesReady
+  observedGeneration: 1
+  phase: Ready
+  release:
+    name: OpenShift AI Self-Managed
+    version: 3.5.1

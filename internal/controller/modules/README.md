@@ -11,65 +11,64 @@ For the full architectural context, see
 ## Architecture
 
 The modular orchestrator manages **out-of-tree module operators** alongside the
-existing in-tree components. The DSC controller's action pipeline handles both:
+remaining in-tree components. OpenShift separates user-facing configuration
+from operator deployment:
 
 ```text
-DSC Reconcile
-  -> provisionComponents       (component CRs -> rr.Resources)
-  -> cleanupDisabledModules    (two-phase cleanup of disabled module resources)
-  -> provisionModules          (module operator manifests -> rr.HelmCharts
-                                and/or rr.Manifests; module CRs -> rr.Resources)
-  -> helm.NewAction            (renders Helm charts into rr.Resources)
-  -> kustomize.NewAction       (renders Kustomize manifests into rr.Resources)
-  -> deploy.NewAction          (SSA-applies everything in rr.Resources)
-  -> updateModuleStatus        (reads module CR status -> DSC conditions)
-  -> gc.NewAction              (deletes resources missing from rr.Resources)
+DSC / DSCI Reconcile
+  -> project source-owned management state into Platform.spec.modules
+  -> build and apply source-owned module CRs
+  -> watch module CR status and propagate it to DSC / DSCI status
+
+Platform Reconcile
+  -> cleanupDisabledModules    (keep operators while CR finalizers run)
+  -> provisionModules          (resolve production DAG; collect operator manifests)
+  -> Helm / Kustomize render
+  -> inject module env and platform config
+  -> deploy.NewAction          (SSA-apply operator resources)
+  -> updateModuleStatus        (aggregate module CR status on Platform)
+  -> gc.NewAction              (last action; clean owned operator resources)
 ```
 
-Module CRs follow the same lifecycle as component CRs: they are added to
-`rr.Resources` when enabled and removed by the GC action when disabled.
+On xKS, the chart supplies the `Platform` CR directly. The Platform controller
+therefore uses one orchestration path on every platform, while DSC/DSCI remain
+the OpenShift source of module configuration and module CR ownership.
 
-`deploy.NewAction` automatically sets `platform.opendatahub.io/part-of` labels
-and platform annotations on all resources in `rr.Resources`, including module
-CRs and module operator resources.
-
-`updateModuleStatus` performs staleness detection (comparing
-`status.observedGeneration` against `metadata.generation`) and propagates
-`Degraded` status. If all modules are `Ready` but some report `Degraded=True`,
-`ModulesReady` is set to `False` with a message listing the degraded modules.
+Status readiness includes staleness detection
+(`status.observedGeneration == metadata.generation`) and the platform release
+handshake. A module that is degraded, stale, or reporting the wrong platform
+release cannot advance DAG readiness.
 
 ### Module CR ownership and cleanup
 
-The module reconciler uses `WithDynamicOwnership()` which enables automatic
-owner reference injection on **all** deployed resources. The deploy action
-sets the primary resource (DSC or Platform) as controller owner of every
-resource it applies — module CRs, operator Deployments, RBAC, etc. This
-provides:
+Module CR ownership follows the registration's configuration source. The DSC
+controller creates DSC-backed module CRs with the `DataScienceCluster` as
+controller owner; the DSCI controller does the same with
+`DSCInitialization` for DSCI-backed modules such as Monitoring. The Platform
+controller deploys module operator resources and uses `WithDynamicOwnership()`
+for its rendered resources. This provides:
 
-- Cascade deletion: deleting DSC/Platform garbage-collects all module
-  resources via Kubernetes owner reference GC
-- Automatic watch registration: the `dynamicownership` action registers
-  `EnqueueRequestForOwner` watches for each deployed resource type, so
-  changes to module CRs trigger reconciliation of the owning DSC/Platform
-- GC integration: `gc.NewAction` uses `rr.Controller.Owns(objGVK)` to
-  determine which resource types to clean up
+- cascade deletion from the resource that owns each module resource;
+- automatic watch registration through `EnqueueRequestForOwner`, so owned
+  resource changes requeue the owning controller; and
+- GC integration, where `gc.NewAction` uses registered/dynamically discovered
+  owned GVKs to determine what can be cleaned up.
 
-`registerModuleCROwnedTypes` additionally registers module CR GVKs as
-statically owned types so the GC predicate returns true from the first
-reconcile, before dynamic ownership has discovered them.
+The Platform controller registers watches for every module CR GVK and CRD;
+DSC/DSCI controllers register the source-specific status watches needed for
+compatibility status propagation.
 
 CRDs are an exception — the deploy action routes CRDs to a dedicated
 `deployCRD()` path that never sets owner references (CRDs are cluster-scoped
 singletons that may be shared).
 
-`cleanupDisabledModules` implements two-phase cleanup for explicitly
-disabled modules:
+Disabled modules use two-phase cleanup:
 
-1. **Phase 1**: Module is disabled, CR still exists. The action deletes the
-   CR. The module operator Deployment is left running so it can process
-   finalizers and clean up operands.
-2. **Phase 2**: On the next reconcile, the CR is confirmed gone. The action
-   renders the module's Helm chart and deletes each operator resource.
+1. The DSC/DSCI source controller removes the module CR. While it is still
+   deleting, the Platform controller leaves the module operator running so it
+   can process finalizers and clean up operands.
+2. After the CR is confirmed gone, `cleanupDisabledModules` renders and deletes
+   the module operator resources.
 
 ### Component-to-module migration
 
@@ -82,18 +81,57 @@ for the full process.
 
 ## Current modules
 
-Reference implementations under `internal/controller/modules/`:
+Production registrations live in
+[`builtin/handlers.go`](./builtin/handlers.go). Their order, runlevel, and
+configuration source are shared by startup registration and E2E contract
+discovery.
 
-| Module | Handler | Manifest format | Runlevel |
-|--------|---------|-----------------|----------|
-| [AI Gateway](./aigateway/) | `aigateway.NewHandler()` | Kustomize (`SourcePathByPlatform`) | `dag.RL(32)` |
-| [Spark Operator](./sparkoperator/) | `sparkoperator.NewHandler()` | Kustomize (`SourcePath: default`) | `dag.RL(32)` |
+| Runlevel | Module handlers | Configuration source |
+|----------|-----------------|----------------------|
+| `dag.RL(20)` | [AI Pipelines](./aipipelines/), [Dashboard](./dashboard/), [MCP Lifecycle Operator](./mcplifecycleoperator/), [Model Registry](./modelregistry/), [Ray](./ray/), [Trainer](./trainer/), [Workbenches](./workbenches/) | DSC |
+| `dag.RL(20)` | [Monitoring](./monitoring/) | DSCI (`spec.monitoring`) |
+| `dag.RL(31)` | [KServe](./kserve/) | DSC |
+| `dag.RL(32)` | [AI Gateway](./aigateway/), [Feast Operator](./feastoperator/), [MLflow Operator](./mlflowoperator/), [OGX](./ogx/), [Spark Operator](./sparkoperator/), [TrustyAI](./trustyai/) | DSC |
 
-Both are registered in `cmd/main.go` (`existingModules` / `moduleRunlevels`).
-They check `DSC.Spec.Components.<Name>.ManagementState`, project
-`*CommonSpec` into the module CR via `BuildModuleCR`, and rely on the modules
-controller for deploy + dynamic ownership (no static `.Owns()` on the DSC
-controller).
+Kueue remains an in-tree component. Auth and Gateway remain services; Monitoring
+is not a Services `TestGroup` entry.
+
+### E2E module contract
+
+On OpenShift, `tests/e2e/dag_ordering_test.go` resolves the same built-in
+registrations through the production DAG and runs a child contract test for
+each module. The suite is controlled as a whole by
+`E2E_TEST_DAG_ORDERING` / `--test-dag-ordering`; legacy per-component and
+platform-orchestration selectors have been removed.
+
+Each registered module must satisfy the following contract:
+
+1. Its module CR exists and has a controller owner reference to its source DSC
+   or DSCI.
+2. Its `odh-<module>-config` ConfigMap publishes the version from the Platform resource, and its CR reports `Ready=True`, `status.observedGeneration` equal to `metadata.generation`, and a `platform` release matching that ConfigMap value.
+   Missing or incorrect mandatory `Degraded=False` and
+   `ProvisioningSucceeded=True` conditions are emitted in the final
+   `MODULE_CONTRACT_REPORT` as module-configuration findings.
+3. Its operator Deployment is available. The configured target container
+   receives `APPLICATIONS_NAMESPACE` and a non-empty value for every env name
+   returned by `GetRelatedImages()`.
+4. A DSC-backed handler propagates its ready condition to DSC status. The authoritative platform release is validated on the module CR and need not be mirrored into DSC status. Monitoring instead propagates DSCI `Ready`, `ProvisioningSucceeded`, and `MonitoringReady` conditions.
+
+Example focused paths (the parent DAG setup still runs):
+
+```shell
+make e2e-test-single TEST="TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"
+make e2e-test-single TEST="TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/monitoring"
+```
+
+The contract is currently OpenShift-only. `make e2e-test-xks` sets
+`E2E_TEST_DAG_ORDERING=false`; the xKS module contract is deferred.
+
+Runlevel gating uses a 10-minute default timeout. Operators can override it
+with `ODH_DAG_RUNLEVEL_TIMEOUT` or `--dag-runlevel-timeout`; the OpenShift E2E
+suite temporarily sets the operator value to 5 minutes. Empty platform release
+status is treated as ready for first installation, so E2E validates ordering
+during a simulated platform-version upgrade.
 
 ## Adding a New Module
 
@@ -166,20 +204,26 @@ func NewHandler() *handler {
 }
 ```
 
-Both variants still require `IsEnabled` and `BuildModuleCR`. `BuildModuleCR`
-receives a `*PlatformContext` containing all platform-level fields -- see the
+Both variants must provide the module-specific `IsEnabled`,
+`PopulatePlatformModule`, and `BuildModuleCR` behavior. `BuildModuleCR`
+receives a `*DSCContext` plus `*ModuleCRConfig`; see the
 [Developer Guide](../../../docs/modular/Module%20Handler%20Developer%20Guide.md)
-for the full handler code.
+for complete handler examples.
 
-`BaseHandler` provides default implementations for the remaining four
-interface methods:
+`BaseHandler` supplies mechanical behavior driven by `ModuleConfig`, including:
 
 | Method | Default behaviour |
 |---|---|
-| `GetName()` | Returns `Config.Name` |
-| `GetGVK()` | Returns `Config.GVK` |
-| `GetOperatorManifests()` | Returns `OperatorManifests` with `HelmCharts` (if `ChartDir` set) and/or `Manifests` (if `ManifestDir` set) |
-| `GetModuleStatus()` | GETs the module CR by `Config.GVK` + `Config.CRName`, parses `.status.conditions` and `.status.observedGeneration`, returns a `*ModuleStatus` |
+| `GetName()` / `GetGVK()` | Return `Config.Name` / `Config.GVK` |
+| `GetOperatorManifests()` | Return Helm and/or Kustomize descriptors from `ModuleConfig` |
+| `GetRelatedImages()` | Return the module-scoped `RELATED_IMAGE_*` env names |
+| `GetModuleStatus()` | Read conditions, generations, and release metadata from the singleton module CR |
+| `GetModuleCRState()` / `DeleteModuleCR()` | Implement idempotent singleton lifecycle operations |
+| `DeleteOperatorResources()` | Render and delete module operator resources during phase-two cleanup |
+| `WriteDSCComponentStatus()` | Write management state and releases to the typed DSC component status field |
+
+`BaseHandler.PopulatePlatformModule` is a no-op, so a production handler must
+override it to project DSC/DSCI management state into the Platform CR.
 
 ### 3. DSC API stanza (`api/datasciencecluster/v2/datasciencecluster_types.go`)
 
@@ -208,44 +252,48 @@ type MyModuleCommonSpec struct {
 After modifying the API types, run `make generate` and `make manifests` to
 regenerate deepcopy functions and CRD manifests.
 
-### 4. Registration (`cmd/main.go`)
+### 4. Registration (`internal/controller/modules/builtin/handlers.go`)
 
-Import the handler package and add it to the `existingModules` map:
+Import the handler package and add one `ModuleRegistration` to the production
+registration slice. DSC is the default configuration source:
 
 ```go
 import mymodule "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules/mymodule"
 
-// In the var block:
-existingModules = map[string]mr.ModuleHandler{
-    "mymodule": mymodule.NewHandler(),
-}
+{
+    Handler:  mymodule.NewHandler(),
+    Runlevel: dag.RL(32),
+},
 ```
+
+For a DSCI-backed module, also set `ConfigSource: modules.ConfigFromDSCI`.
+Registration controls startup wiring, DAG ordering, cleanup ownership source,
+and automatic enrollment in the OpenShift E2E module contract. Add the module
+to `tests/e2e/scripts/e2e-scope-rules.yaml` so registry-completeness tests can
+validate path ownership; scope rules do not filter the DAG contract.
 
 ## Package Reference
 
 ### `types.go` -- ModuleHandler interface and PlatformContext
 
-The 8-method contract between the platform and each module handler:
+The `ModuleHandler` contract between the platform and each module handler:
 
-- `GetName()` -- unique identifier (registry key, log messages)
-- `IsEnabled(platform)` -- reads DSC/DSCI to determine enablement
-- `GetGVK()` -- module CR's GroupVersionKind (used for watch and ownership
-  registration)
-- `GetOperatorManifests(platform)` -- returns `OperatorManifests` with Helm
-  charts and/or Kustomize manifests for the module operator
-- `BuildModuleCR(ctx, cli, platform)` -- constructs the module CR with
-  platform fields projected from `*PlatformContext`
-- `GetRelatedImages()` -- returns `RELATED_IMAGE_*` env var names
-- `GetModuleStatus(ctx, cli)` -- returns `*ModuleStatus` with conditions and
-  generation metadata for staleness detection
-- `ModuleCRExists(ctx, cli)` -- checks if the module CR exists on the cluster
-  (returns false when the CRD is absent)
-- `DeleteOperatorResources(ctx, cli, platform)` -- renders the module's Helm
-  chart and deletes each resource from the cluster (for two-phase cleanup)
+- `GetName()` and `GetGVK()` identify the registry entry and module CR type.
+- `IsEnabled(modules)` reads projected Platform module state.
+- `GetOperatorManifests(platform)` returns Helm and/or Kustomize descriptors.
+- `PopulatePlatformModule(pm, dscCtx)` projects DSC/DSCI management state into
+  the Platform CR.
+- `BuildModuleCR(ctx, cli, dscCtx, cfg)` constructs the source-owned module CR.
+- `GetRelatedImages()` declares module-scoped env names for operand images.
+- `GetModuleStatus(ctx, cli)` returns conditions, generation metadata, and
+  release metadata used by DAG readiness and status aggregation.
+- `GetModuleCRState(ctx, cli)` and `DeleteModuleCR(ctx, cli)` implement the
+  three-state module CR lifecycle used by two-phase cleanup.
+- `DeleteOperatorResources(ctx, cli, platform)` removes rendered operator
+  resources after the module CR is gone.
+- `WriteDSCComponentStatus(dsc, enabled, releases)` exposes management state
+  and release metadata on typed DSC status.
 
-`OwnedTypeRegistrar` is a single-method interface (`AddOwnedType(gvk)`) used
-by `registerModuleCROwnedTypes` to register module CR GVKs as statically
-owned types on the reconciler.
 
 `PlatformContext` is built once per reconcile in `provisionModules` and passed
 to every handler's `BuildModuleCR`. It exposes:
@@ -255,7 +303,9 @@ to every handler's `BuildModuleCR`. It exposes:
 | `ApplicationsNamespace` | `DSCI.Spec.ApplicationsNamespace` | Namespace where module operands deploy |
 | `MonitoringNamespace` | `DSCI.Spec.Monitoring.Namespace` | Namespace for the monitoring stack (empty when monitoring is unset or in xKS mode with no DSCI) |
 | `Release` | `rr.Release` | Platform identity (ODH/RHOAI) and version |
-| `DSC` | reconcile instance | The `DataScienceCluster` instance for reading module-specific component stanzas |
+| `Modules` | `Platform.Spec.Modules` | Projected per-module management state |
+| `ChartsBasePath` | reconciler settings | Base path for bundled Helm charts |
+| `ManifestsBasePath` | reconciler settings | Base path for bundled Kustomize manifests |
 
 #### Injected environment variables (platform → module operator)
 
@@ -268,28 +318,39 @@ that needs these values must read them by these exact, unprefixed names.
 |---|---|---|
 | `APPLICATIONS_NAMESPACE` | `PlatformContext.ApplicationsNamespace` | Always injected when set |
 | `MONITORING_NAMESPACE` | `PlatformContext.MonitoringNamespace` | Skipped when empty (e.g. monitoring unset, xKS) |
-| `RELATED_IMAGE_*` | operator env of the same name | Scoped per module via `GetRelatedImages()` |
+| `ODH_MODULE_OPERATOR_PLATFORM_TYPE` | active platform type | Injected when platform type is known |
+| `RELATED_IMAGE_*` | operator env of the same name | Scoped per module via `GetRelatedImages()`; empty source values are skipped |
+| module `ExtraEnv` | `ModuleConfig.ExtraEnv` | Fixed module-owned handoff/configuration values |
 
-Note: the operator's own config env (`ODH_MANAGER_DSC_MONITORING_NAMESPACE`, bound
-via viper) is a separate input mechanism and is unrelated to these injected names.
+`ModuleConfig.ControllerImage` is different from `RelatedImages`: its env value
+overrides the rendered operator container image (and an optional named init
+container), while `RelatedImages` are injected as env vars for the module
+operator to consume. `DeploymentName` and `ContainerName` must identify the
+rendered target correctly. The E2E module contract requires all declared
+`RelatedImages` and `APPLICATIONS_NAMESPACE`; controller-image and other
+injection behavior also has focused unit coverage.
+
+The operator's own config env (`ODH_MANAGER_DSC_MONITORING_NAMESPACE`, bound via
+viper) is a separate input mechanism and is unrelated to these injected names.
 
 ### `base.go` -- BaseHandler and ModuleConfig
 
-`ModuleConfig` holds static metadata (name, GVK, manifest info). Set `ChartDir`
-for Helm or `ManifestDir` for Kustomize (or both). `BaseHandler` provides
-default implementations for `GetName`, `GetGVK`, `GetOperatorManifests`, and
-`GetModuleStatus`. Module teams embed `BaseHandler` and only implement
-`IsEnabled` and `BuildModuleCR`.
+`ModuleConfig` holds static metadata (name, GVK, manifest paths, deployment
+and container names, controller-image override, related images, fixed env, and
+status extensions). Set `ChartDir` for Helm or `ManifestDir` for Kustomize (or
+both). Module teams embed `BaseHandler` and implement the source-specific
+`IsEnabled`, `PopulatePlatformModule`, and `BuildModuleCR` behavior.
 
-`ModuleStatus` bundles parsed conditions with generation metadata
-(`ObservedGeneration`, `Generation`) for staleness detection.
+`ModuleStatus` bundles parsed conditions, generation metadata
+(`ObservedGeneration`, `Generation`), `ReleaseVersion`, and the full release
+list for readiness gating and DSC status propagation.
 
 `ParseConditions(u)` is a shared utility that extracts `[]metav1.Condition`
 from an unstructured object's `.status.conditions` field, including
 `ObservedGeneration` and `LastTransitionTime`.
 
-`ModuleCRExists` GETs the module CR by GVK + CRName and returns `true` if
-found, `false` if not found or if the CRD does not exist.
+`GetModuleCRState` reports `Absent`, `Alive`, or `Deleting`; not-found and
+missing-CRD cases are treated as absent. `DeleteModuleCR` is idempotent.
 
 `DeleteOperatorResources` renders the module's Helm chart via
 `GetOperatorManifests`, then deletes each rendered resource from the cluster.
@@ -297,24 +358,26 @@ NotFound errors are silently ignored for idempotency.
 
 ### `registry.go` -- Module registry
 
-A singleton registry that stores `ModuleHandler` instances. Handlers are
-registered at program startup in `cmd/main.go`. The registry supports:
+A singleton registry that stores `ModuleHandler` instances. Built-in handlers
+and their runlevels/configuration sources come from `builtin.Registrations()`
+and are registered at program startup. The registry supports:
 
 - `Add(handler, ...RegistrationOption)` -- register a handler
 - `Enable(name)` / `Disable(name)` -- CLI suppression flag integration
-- `ForEach(fn)` -- iterate enabled handlers (used by `provisionModules`)
+- `ForEach(fn)` / `ForEachEnabled(fn)` -- iterate enabled handlers
+- `ForAll(fn)` -- iterate all handlers, including startup-suppressed entries
+- `ForConfigSource(source, fn)` -- iterate DSC- or DSCI-backed registrations
+- `ResolvedBatches()` / `ReverseBatches()` -- resolve provisioning/cleanup DAG order
 - `HasEntries()` -- check if any modules are registered
-- `RegistrationOption` -- `WithRunlevel(int)` for DAG-based ordering
+- `RegistrationOption` -- `WithRunlevel(...)` and `WithConfigSource(...)`
 
-### `watch.go` -- Static ownership registration
+### `modules_controller.go` -- Watches and dynamic ownership
 
-`registerModuleCROwnedTypes(rec)` registers each module's CR GVK as a
-statically owned type on the reconciler via `AddOwnedType`. This ensures
-`gc.NewAction`'s type predicate returns true for module CRs from the first
-reconcile. Watch registration is handled automatically by the
-`dynamicownership` action (enabled via `WithDynamicOwnership` on the
-builder), which uses `EnqueueRequestForOwner` so module CR status changes
-trigger reconciliation of the owning DSC/Platform.
+The Platform controller watches registered module CR and CRD GVKs so status
+and newly installed APIs trigger reconciliation. It uses dynamic ownership for
+rendered module operator resources. DSC and DSCI controllers separately watch
+the module CRs sourced from their APIs and propagate compatibility status to
+the corresponding user-facing resource.
 
 ## Suppression Flags
 

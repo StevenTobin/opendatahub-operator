@@ -38,6 +38,7 @@ import (
 	infrav1 "github.com/opendatahub-io/opendatahub-operator/v2/api/infrastructure/v1"
 	serviceApi "github.com/opendatahub-io/opendatahub-operator/v2/api/services/v1alpha1"
 	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/services/gateway"
+	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/status"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster/gvk"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/controller/actions/dependency/certmanager"
@@ -99,6 +100,28 @@ func (tc *GatewayTestCtx) gatewayName() string {
 
 func (tc *GatewayTestCtx) gatewayNamespace() string {
 	return gateway.GetGatewayNamespace()
+}
+
+func (tc *GatewayTestCtx) UpdateComponentStateInDataScienceClusterWithKind(state operatorv1.ManagementState, kind string) {
+	if kind != componentApi.DashboardKind {
+		tc.g.Expect(kind).To(Equal(componentApi.DashboardKind), "unsupported Gateway test component kind")
+		return
+	}
+
+	specPath := ".spec.components.dashboard.standard.managementState"
+	readyStatus := metav1.ConditionFalse
+	if state == operatorv1.Managed {
+		readyStatus = metav1.ConditionTrue
+	}
+
+	tc.EventuallyResourcePatched(
+		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
+		WithMutateFunc(testf.Transform(`%s = "%s"`, specPath, state)),
+		WithCondition(And(
+			jq.Match(`%s == "%s"`, specPath, state),
+			jq.Match(`any(.status.conditions[]; .type == "%s" and .status == "%s")`, componentApi.DashboardKind+status.ReadySuffix, readyStatus),
+		)),
+	)
 }
 
 func (tc *GatewayTestCtx) gatewayControllerName() string {

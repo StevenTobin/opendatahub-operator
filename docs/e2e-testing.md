@@ -1,7 +1,8 @@
 # How to run E2E Tests
 
-This document covers running E2E tests locally, both on KinD (KServe component) and on
-OpenShift (full suite). For CI-triggered integration tests via Jenkins, see
+This document covers running E2E tests locally on KinD/xKS and OpenShift. The OpenShift
+suite includes the DAG ordering and registered-module contract; xKS contract coverage is
+deferred. For CI-triggered integration tests via Jenkins, see
 [integration-testing.md](integration-testing.md).
 
 ## When E2E Tests are Required
@@ -33,63 +34,40 @@ For OpenShift tests additionally:
 - **OpenShift cluster** with `oc` CLI configured
 - **Dependent operators** installed (OpenShift Service Mesh, Serverless, etc.)
 
+The DAG/module-contract suite idempotently installs the OpenShift cert-manager, JobSet, and Red Hat Connectivity Link operators through OLM when they are missing. It also waits for cert-manager's `Issuer` and `Certificate` CRDs and creates the cluster-scoped `JobSetOperator` resource. Other module dependencies remain cluster prerequisites.
+
 ## Understanding the Test Suites
 
-The E2E test suite is organized into test groups that run sequentially. Within each group,
-component tests run in parallel. The suite supports two main targets:
+The E2E test suite is organized into test groups that run sequentially:
 
-- **`make e2e-test-xks`** — KServe and gateway tests on KinD / vanilla Kubernetes.
+- **`make e2e-test-xks`** — Gateway-focused tests on KinD / vanilla Kubernetes.
   This is the CI-equivalent E2E for KinD (see `.github/workflows/test-kind-odh-e2e.yaml`).
-  It covers KServe component and platform-orchestration behavior (module lifecycle, CR lifecycle,
-  spec projection, status propagation, and resilience), gateway infrastructure (GatewayConfig,
-  kube-auth-proxy, EnvoyFilter), and xKS DAG runlevel gating.
+  The target explicitly sets `E2E_TEST_DAG_ORDERING=false`; the xKS module contract is
+  deferred and is not implied by this target.
 
-- **`make e2e-test`** — Full suite across all components, DSC/DSCI lifecycle,
-  services, webhooks, and operator resilience. Requires an OpenShift cluster.
+- **`make e2e-test`** — Full OpenShift suite across DSC/DSCI lifecycle, the DAG
+  ordering and module contract, Auth/Gateway services, webhooks, and operator resilience.
 
-### Conversion webhook tests
+Legacy per-component suites and files no longer exist. Registered modules are discovered from
+production registrations, ordered by the production DAG, and checked individually as child tests
+within `DAG Ordering E2E Tests`. The complete contract is controlled by
+`E2E_TEST_DAG_ORDERING` or `--test-dag-ordering`; there is no per-module selection flag.
 
-The OpenShift `All` and `Tier3` suites run conversion tests after component and
-service tests. Targeted runs include them only when
-`E2E_TEST_CONVERSION_WEBHOOK=true` is set. The existing `E2E_TEST_WEBHOOK` flag
-still controls monitoring admission-webhook tests; it does not select conversion
-tests.
+For each registered module, the contract verifies:
 
-The conversion subtests are grouped by the CRD whose webhook is exercised:
+- the module CR is owned by its configuration source (`DataScienceCluster`, or
+  `DSCInitialization` for Monitoring);
+- `Ready=True`, current `observedGeneration`, a per-module ConfigMap version matching the Platform resource, and a module CR `platform` release matching that ConfigMap;
+- mandatory `Degraded=False` and `ProvisioningSucceeded=True` conformance, reported in the final `MODULE_CONTRACT_REPORT` without failing platform-owned coverage;
+- an available module-operator Deployment with `APPLICATIONS_NAMESPACE` and every
+  handler-declared `RELATED_IMAGE_*` that is configured on the platform operator injected with the same value; and
+- readiness propagation to DSC status, or DSCI readiness and `MonitoringReady=True` for Monitoring. Platform release is validated on the authoritative module CR rather than DSC status.
 
-```text
-TestOdhOperator/webhooks/conversion/
-├── dsc/{dashboard,aihub,ai-gateway,data,trainingoperator,llamastackoperator}/{v2_v3,v3_v2}/...
-└── platform/v1alpha1_v1alpha2
-```
-
-Both groups run by default. Set `E2E_TEST_CONVERSION_WEBHOOK_DSC=false` for
-Platform-only tests, or `E2E_TEST_CONVERSION_WEBHOOK_PLATFORM=false` for DSC-only
-tests. Setting both to `false` skips the conversion suite. The DSC group reuses
-or creates `DSCInitialization/default-dsci` and deletes `default-dsc` during its
-scenarios; on a non-disposable cluster, enable
-`E2E_TEST_BACKUP_AND_RESTORE_DSCI_AND_DSC=true`. Platform-only runs do not create
-a DSCI. Conversion tests are skipped on xKS clusters.
-
-The `Tier3` component suites also include v2 DSC smoke cases for Dashboard,
-ModelRegistry/AIHub, FeastOperator/Data, and AI Gateway. They use the v2 API to
-change the same DSC exercised by the normal component suite, verify its v3
-projection and runtime, then restore their own fields. These cases run with
-normal component selection; they do not require the conversion-webhook flag.
-For a targeted run after installing a new image, for example:
-
-```bash
-E2E_TEST_DSC_MANAGEMENT=true E2E_TEST_COMPONENTS=true \
-  E2E_TEST_COMPONENT=dashboard E2E_TEST_TAG=Tier3 \
-  E2E_TEST_CONVERSION_WEBHOOK=false make e2e-test
-```
-
-Repeat with `aihub`, `data`, or `aigateway` as the component.
-The explicit `E2E_TEST_COMPONENTS=true` overrides a local `.envrc` configured
-for conversion-only tests. On a clean cluster, enable `E2E_TEST_DSC_MANAGEMENT`
-for the first run so the suite creates `default-dsci` and `default-dsc` before
-component tests. Subsequent runs can omit it if those resources remain; with
-`E2E_TEST_DELETION_POLICY=never`, the suite leaves them in place.
+The operator's default DAG runlevel timeout is 10 minutes and is configurable with
+`ODH_DAG_RUNLEVEL_TIMEOUT` or `--dag-runlevel-timeout`. The OpenShift DAG E2E temporarily
+sets it to 5 minutes for upgrade-order checks. Initial bootstrap is intentionally ungated
+when a module has not yet reported a platform release; runlevel ordering is validated during
+a simulated platform-version upgrade.
 
 ## KinD E2E (KServe and Gateway)
 
@@ -136,7 +114,8 @@ component tests. Subsequent runs can omit it if those resources remain; with
    ```
 
 10. **Run E2E tests**: `make e2e-test-xks`
-    - On xKS, tests bootstrap `Platform`, Dex, and `GatewayConfig` (with OIDC) automatically — see [Dex OIDC provider](#dex-oidc-provider-kind-xks-gateway) below
+    - The target runs Gateway service coverage and disables the DAG/module contract because the xKS contract is deferred
+    - Tests bootstrap `Platform`, Dex, and `GatewayConfig` (with OIDC) automatically — see [Dex OIDC provider](#dex-oidc-provider-kind-xks-gateway) below
     - Production xKS installs create `GatewayConfig` via the `xks-gateway` Helm subchart in odh-gitops instead
 
 11. **Cleanup**: `make kind-delete`
@@ -174,150 +153,13 @@ make e2e-test-xks E2E_TEST_SERVICE=gateway
 - **Redirect URI** is `https://rh-ai.kind.local/oauth2/callback` (gateway hostname + OAuth callback path).
 - **arm64 Mac**: Dex is multi-arch, but `odh-kube-auth-proxy` is still amd64-only; deployment readiness may fail locally even with Dex running.
 
-## Full E2E on KinD (Experimental)
+## OpenShift DAG Contract on KinD
 
-The standard `e2e-test-xks` target runs KServe, gateway, and xKS DAG ordering tests. It is possible to run the
-broader component E2E suite on KinD with additional setup to bridge the gap between
-KinD and OpenShift.
-
-After completing the standard KinD setup (steps 1–8 above, using `make deploy` instead
-of `make deploy-rhaii-local` — see [Deploying in full mode](#deploying-in-full-mode)):
-
-### Required adjustments
-
-Six adjustments bridge the gap between KinD and OpenShift. This is a high-level overview;
-each adjustment requires manual implementation specific to your cluster setup:
-
-1. **Kubelet storage isolation** — KinD disables `localStorageCapacityIsolation` by default,
-   so nodes don't advertise ephemeral-storage capacity. The dashboard pod (9 containers)
-   requests ephemeral-storage and won't schedule without it.
-
-2. **Ghost CRDs** — The operator's controllers watch OpenShift-specific resource types
-   (Route, ConsoleLink, Template, SCC, OperatorCondition, ImageStream, etc.). Stub CRDs
-   with `x-kubernetes-preserve-unknown-fields: true` prevent controller startup failures.
-
-3. **Fake OpenShift configs** — The gateway controller reads `ingresses.config.openshift.io/cluster`,
-   `authentications.config.openshift.io/cluster`, and `apiservers.config.openshift.io/cluster` (for
-   kube-auth-proxy TLS settings from `spec.tlsSecurityProfile`). Minimal stub resources satisfy these lookups.
-
-4. **Webhook CA injection** — On OpenShift, the service-CA operator injects CA bundles into
-   webhook configurations and CRD conversion webhooks. On KinD, the CA must be extracted from
-   the `opendatahub-operator-controller-webhook-cert` secret and patched manually.
-
-5. **Cert-manager Certificates** — Several operands (kuberay, model-serving-api,
-   odh-model-controller, odh-notebook-controller, mlflow-operator) expect TLS secrets that
-   are normally provisioned by platform services. Certificate CRs must be created manually
-   using the `opendatahub-ca-issuer` ClusterIssuer.
-
-6. **Pull secrets** — Images from `registry.redhat.io` require authentication. The pull secret
-   must be present in the `opendatahub` namespace for operand pods.
-
-### Create DSCI and DSC
-
-After applying the adjustments, create the platform resources:
-
-```bash
-kubectl apply -f - <<EOF
-apiVersion: dscinitialization.opendatahub.io/v2
-kind: DSCInitialization
-metadata:
-  name: default-dsci
-spec:
-  applicationsNamespace: opendatahub
-  monitoring:
-    managementState: Removed
-    namespace: opendatahub
-  trustedCABundle:
-    managementState: Removed
-EOF
-
-kubectl apply -f - <<EOF
-apiVersion: datasciencecluster.opendatahub.io/v2
-kind: DataScienceCluster
-metadata:
-  name: default-dsc
-spec:
-  components:
-    dashboard:
-      managementState: Managed
-    aipipelines:
-      managementState: Managed
-    kserve:
-      managementState: Managed
-    ray:
-      managementState: Managed
-    workbenches:
-      managementState: Managed
-    trustyai:
-      managementState: Managed
-    sparkoperator:
-      managementState: Managed
-    mlflowoperator:
-      managementState: Managed
-    feastoperator:
-      managementState: Managed
-    llamastackoperator:
-      managementState: Managed
-    modelregistry:
-      managementState: Removed
-    trainer:
-      managementState: Removed
-    kueue:
-      managementState: Removed
-EOF
-```
-
-Wait for the DSC to become ready:
-
-```bash
-kubectl wait --for=jsonpath='{.status.phase}'=Ready dsc/default-dsc --timeout=600s
-```
-
-### Run the tests
-
-```bash
-E2E_TEST_CLEAN_UP_PREVIOUS_RESOURCES=false \
-E2E_TEST_DEPENDANT_OPERATORS_MANAGEMENT=false \
-E2E_TEST_SERVICES=false \
-E2E_TEST_WEBHOOK=false \
-E2E_TEST_OPERATOR_RESILIENCE=false \
-E2E_TEST_OPERATOR_V2TOV3UPGRADE=false \
-E2E_TEST_DSC_MANAGEMENT=false \
-E2E_TEST_DSC_VALIDATION=false \
-E2E_TEST_DELETION_POLICY=never \
-E2E_TEST_OPERATOR_CONTROLLER=false \
-go test ./tests/e2e/ \
-  -run "TestOdhOperator/components/.*/.*/(Validate_(component_enabled|component_conditions|update_operand|operands_have|resource_deletion|argoWorkflow|component_releases))" \
-  -timeout=60m -v -count=1 -tags odh
-```
-
-### Known limitations
-
-Four components cannot reach `Managed` state on KinD:
-
-| Component | Reason |
-|-----------|--------|
-| ModelRegistry | Cert-manager secret file permissions (0600) incompatible with non-root container — requires OpenShift SCC `fsGroup` injection |
-| Trainer | Requires JobSet operator (not just the CRD) |
-| Kueue | Webhook validator rejects `Managed` state |
-| ModelsAsService | Requires AuthConfig CRD (`authorino.kuadrant.io/v1beta3`) not available on KinD |
-
-These components should be set to `managementState: Removed` in the DSC. Their tests will
-be skipped.
-
-### Deploying in full mode
-
-The standard KinD path uses `make deploy-rhaii-local` which restricts to KServe-only mode.
-For the full E2E, use `make deploy` instead, then patch imagePullPolicy:
-
-```bash
-IMG=localhost/odh-operator:e2e make deploy
-
-kubectl patch deployment opendatahub-operator-controller-manager \
-  -n opendatahub-operator-system --type=json \
-  -p='[{"op":"replace","path":"/spec/template/spec/initContainers/0/imagePullPolicy","value":"IfNotPresent"},
-       {"op":"replace","path":"/spec/template/spec/containers/0/imagePullPolicy","value":"IfNotPresent"}]'
-```
+The OpenShift DAG/module contract is not currently supported on KinD or other xKS
+clusters. The previous manual command for a broader per-component KinD suite depended on
+legacy component test files that have been removed. Use `make e2e-test` on OpenShift for
+registered-module contract coverage; `make e2e-test-xks` intentionally disables it with
+`E2E_TEST_DAG_ORDERING=false`.
 
 ## Full E2E on OpenShift
 
@@ -335,26 +177,28 @@ kubectl patch deployment opendatahub-operator-controller-manager \
 
 4. **Run full E2E tests**: `make e2e-test`
 
-5. **Run a single test** (useful for debugging):
-   `make e2e-test-single TEST="TestOdhOperator/Component_Tests/dashboard/Validate component enabled"`
+5. **Run a single module contract path** (useful for debugging):
+   `make e2e-test-single TEST="TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"`
 
-### Running a single component
+### Running a registered module contract path
 
-To test only one component without running the full suite:
+There is no `E2E_TEST_COMPONENT` or platform-orchestration filter. The normal DAG suite
+checks every registered module. For focused debugging, select a module child path while
+retaining the parent DAG setup, for example:
 
 ```bash
-make e2e-test \
-  -e E2E_TEST_COMPONENT="dashboard" \
-  -e E2E_TEST_SERVICES=false \
-  -e E2E_TEST_WEBHOOK=false \
-  -e E2E_TEST_OPERATOR_RESILIENCE=false \
-  -e E2E_TEST_DSC_MANAGEMENT=false \
-  -e E2E_TEST_DSC_VALIDATION=false
+go test -v ./tests/e2e/ \
+  -run "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve" \
+  -timeout=60m
 ```
+
+Other examples include `Runlevel_20_module_contracts/monitoring` for the DSCI-backed
+Monitoring module and `Runlevel_32_module_contracts/sparkoperator`. The parent test still
+enables the production registration set and resolves real DAG ordering.
 
 ### Setting up cluster prerequisites only
 
-To create DSCI and DSC resources without running component tests (useful for manual testing):
+To create DSCI and DSC resources without running the DAG/module contract (useful for manual testing):
 `make e2e-setup-cluster`
 
 ### Namespace defaults
@@ -447,10 +291,10 @@ done
 | `make kind-setup-pull-secrets` | Configure pull secrets for `registry.redhat.io` |
 | `make deploy-ccm-local-azure` | Deploy Cloud Manager with local image pull policy |
 | `make deploy-rhaii-local` | Deploy operator in XKS mode (KServe module + gateway service enabled) |
-| `make e2e-test-xks` | Run KinD E2E tests (KServe component + gateway service + xKS DAG ordering) |
+| `make e2e-test-xks` | Run KinD/xKS Gateway E2E tests with the DAG/module contract disabled |
 | `make e2e-test` | Run full E2E tests (requires OpenShift) |
 | `make e2e-test-single TEST="<path>"` | Run a single E2E test |
-| `make e2e-setup-cluster` | Create DSCI/DSC without running component tests |
+| `make e2e-setup-cluster` | Create DSCI/DSC without running the DAG/module contract |
 | `make deploy` | Deploy operator via kustomize (OpenShift) |
 
 ### Environment variables
@@ -459,41 +303,22 @@ Build/cluster variables (`IMG`, `IMAGE_BUILDER`, `CLUSTER_NAME`, `PULL_SECRET`, 
 documented in the Makefile help text — run `make help` for the full list.
 
 E2E test suites are controlled by `E2E_TEST_*` env vars (or equivalent `--test-*` CLI flags).
-Each var enables/disables a test group or filters components. Defaults and descriptions live
-in `tests/e2e/controller_test.go` (`TestMain`). Key vars:
+Defaults and descriptions live in `tests/e2e/controller_test.go` (`TestMain`). Key vars:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `IMG` | `quay.io/opendatahub/opendatahub-operator:latest` | Operator image |
-| `IMAGE_BUILDER` | `podman` | Container image builder (`podman` or `docker`) |
-| `CLUSTER_NAME` | `kind-odh` | KinD cluster name (used by `kind-create`) |
-| `KIND_CLUSTER_NAME` | `kind-odh` | KinD cluster name (used by `image-kind-load`) |
-| `KIND_CONFIG_PATH` | `config/kind/kind-config.yaml` | KinD cluster config |
-| `PULL_SECRET` | *(required)* | Path to container registry auth config |
-| `E2E_TEST_COMPONENT` | *(all)* | Single component to test (e.g., `kserve`) |
-| `E2E_TEST_PLATFORM_ORCHESTRATION` | `true` | Enable/disable platform orchestration contract tests |
-| `E2E_TEST_PLATFORM_COMPONENT` | *(all)* | Filter platform orchestration tests to specific components (e.g., `dashboard,kserve`) |
-| `E2E_TEST_SERVICES` | `true` | Enable/disable service tests |
-| `E2E_TEST_WEBHOOK` | `true` | Enable/disable the existing monitoring admission-webhook tests when the monitoring service suite runs. |
-| `E2E_TEST_CONVERSION_WEBHOOK` | auto | Conversion webhook scenarios run in full OpenShift `All`/`Tier3` suites. Set `true` to include them in a targeted run or `false` to disable them. DSC scenarios delete `default-dsc`; enable DSCI/DSC backup and restore for non-disposable clusters. |
-| `E2E_TEST_CONVERSION_WEBHOOK_DSC` | `true` | Include DSC conversion scenarios when conversion tests run. Set `false` for Platform-only tests. |
-| `E2E_TEST_CONVERSION_WEBHOOK_PLATFORM` | `true` | Include Platform conversion scenarios when conversion tests run. Set `false` for DSC-only tests. |
-| `E2E_TEST_TIMEOUT` | `110m` | Timeout for the containerized E2E binary, including conversion webhook scenarios. |
-| `E2E_TEST_DSC_MANAGEMENT` | `true` | Enable/disable DSC lifecycle tests |
-| `E2E_TEST_DSC_VALIDATION` | `true` | Enable/disable DSC validation tests |
-| `E2E_TEST_OPERATOR_RESILIENCE` | `true` | Enable/disable operator resilience tests |
-| `E2E_TEST_CLEAN_UP_PREVIOUS_RESOURCES` | `true` | Clean up existing resources before tests |
-| `E2E_TEST_DEPENDANT_OPERATORS_MANAGEMENT` | `true` | Enable/disable dependent operator management |
-| `E2E_TEST_OPERATOR_CONTROLLER` | `true` | Enable/disable operator controller tests |
-| `E2E_TEST_OPERATOR_V2TOV3UPGRADE` | `true` | Enable/disable v2-to-v3 upgrade tests |
-| `E2E_TEST_COMPONENTS` | `false` | *(Deprecated)* Enable per-component tests (superseded by platform orchestration) |
-| `E2E_TEST_DELETION_POLICY` | `always` | Deletion policy for test resources (`never`, `always`, `on-failure`) |
-| `E2E_AUTO_RESOLVE` | `false` | When `true`, derive `E2E_TEST_COMPONENT`/`E2E_TEST_SERVICE` automatically from changed files instead of running the full suite. See [Path-based test scoping](#path-based-test-scoping). |
+| Variable | CLI flag | Default | Description |
+|----------|----------|---------|-------------|
+| `E2E_TEST_DAG_ORDERING` | `--test-dag-ordering` | `true` | Run OpenShift DAG ordering and every registered-module contract |
+| `E2E_TEST_SERVICES` | `--test-services` | `true` | Run the Services `TestGroup` |
+| `E2E_TEST_SERVICE` | `--test-service` | `auth,gateway` | Select Auth and/or Gateway service tests |
+| `E2E_TEST_DELETION_POLICY` | `--deletion-policy` | `always` | Delete test resources `never`, `always`, or `on-failure` |
+| `E2E_AUTO_RESOLVE` | *(Makefile only)* | `false` | Apply path-based scope to service tests only; the DAG/module contract remains unfiltered |
+
+The historical V2-to-V3 upgrade suite and its E2E flag have been removed.
 
 ### Path-based test scoping
 
-`make e2e-test` can narrow which component/service tests run for a PR to just the ones its changed files actually affect, instead of always running the full suite. This is handled by `cmd/manifest-tools`'s `resolve-e2e-scope` subcommand, which classifies each changed file against `tests/e2e/scripts/e2e-scope-rules.yaml` — the config file that maps directory conventions to component/service names, declares dependencies between them (e.g. a change to `kserve` also needs `trustyai`'s tests), and lists paths/names that never affect test selection (docs, Cloud Manager's separately-tested footprint).
+`make e2e-test` runs `cmd/manifest-tools resolve-e2e-scope`, which classifies changed files against `tests/e2e/scripts/e2e-scope-rules.yaml`. Component/module classifications remain useful for ownership and completeness checks, but they no longer filter E2E module coverage: when `E2E_TEST_DAG_ORDERING=true`, all production module registrations run through the DAG contract.
 
-The resolver always runs and logs its decision (prefixed `SELECTIVE-E2E:` in the job output) regardless of `E2E_AUTO_RESOLVE`. Only when that flag is `true` does the Makefile actually apply the resolved scope; otherwise it's a dry run, so the resolver's accuracy against real PR traffic can be confirmed in job logs before it's ever allowed to restrict what runs. Any classification that isn't unambiguous — an unrecognized name, an unattributable `manifests-config.yaml` change, code outside any known component/service directory — always falls back to running everything; this is a deliberate, non-negotiable invariant, not a gap.
+The resolver always logs its decision with the `SELECTIVE-E2E:` prefix. When `E2E_AUTO_RESOLVE=true`, the Makefile applies only the resolved **service** scope through `E2E_TEST_SERVICE`, or disables the Services group when no service is affected. Ambiguous classifications fall back to the safe full scope.
 
-The resolver's own classification/dependency-expansion/manifest-attribution logic is tested inside `cmd/manifest-tools` (`pkg/e2escope`, `pkg/scoperules`) and runs under `make unit-test`. Separately, `tests/e2e/scripts/e2e-scope-rules.yaml` must stay in sync with the real component/module/service registries (`cmd/main.go`'s `existingComponents`/`existingModules`/`existingServices`, and `tests/e2e/controller_test.go`'s `Components`/`Services` `TestGroup`) — `cmd/main_test.go` and `tests/e2e/e2e_scope_rules_registry_test.go` check this both ways (every registered name needs an entry in the config, and every entry must correspond to something real), and both run under `make unit-test` too, via the `unit-test-e2e-scope-completeness` target. Neither runs under `make e2e-test` itself; see the tracked follow-up gap for that half.
+The resolver logic is tested in `cmd/manifest-tools` (`pkg/e2escope`, `pkg/scoperules`) under `make unit-test`. Registry-completeness tests also keep scope rules aligned with built-in module registrations, the remaining in-tree component registry, and the Auth/Gateway Services `TestGroup`. Monitoring belongs in the component/module scope as a DSCI-backed module, not in the services scope.

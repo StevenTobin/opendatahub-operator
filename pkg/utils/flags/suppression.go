@@ -3,9 +3,12 @@ package flags
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
+
+	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/controller/dag"
 )
 
 // RegisterComponentSuppressionFlags registers suppression flags for a list of component names.
@@ -63,12 +66,24 @@ func RegisterDAGOrderingFlags() error {
 	if err := viper.BindEnv("disable-dag-ordering", "ODH_DISABLE_DAG_ORDERING"); err != nil {
 		return fmt.Errorf("failed to bind disable-dag-ordering: %w", err)
 	}
+
+	pflag.Duration("dag-runlevel-timeout", dag.DefaultTimeout,
+		"Default time a DAG runlevel may remain not ready before provisioning advances")
+	if err := viper.BindEnv("dag-runlevel-timeout", "ODH_DAG_RUNLEVEL_TIMEOUT"); err != nil {
+		return fmt.Errorf("failed to bind dag-runlevel-timeout: %w", err)
+	}
+
 	return nil
 }
 
 // IsDAGOrderingDisabled returns true when DAG runlevel ordering enforcement is disabled.
 func IsDAGOrderingDisabled() bool {
 	return viper.GetBool("disable-dag-ordering")
+}
+
+// GetDAGRunlevelTimeout returns the configured default runlevel timeout.
+func GetDAGRunlevelTimeout() time.Duration {
+	return viper.GetDuration("dag-runlevel-timeout")
 }
 
 // AddResourceSuppressionFlags registers the DSC and DSCI resource suppression flags.

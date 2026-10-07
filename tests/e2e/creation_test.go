@@ -22,32 +22,6 @@ type DSCTestCtx struct {
 	*TestContext
 }
 
-// dependantOperatorsManagementTestSuite runs the dependant operators management test suite.
-func dependantOperatorsManagementTestSuite(t *testing.T) {
-	t.Helper()
-
-	// disruptive tests are only supported on tier3 clusters
-	skipUnless(t, Tier3)
-
-	// Initialize the test context.
-	tc, err := NewTestContext(t)
-	require.NoError(t, err, "Failed to initialize test context")
-
-	// Create an instance of test context.
-	dscTestCtx := DSCTestCtx{
-		TestContext: tc,
-	}
-
-	// Define test cases.
-	testCases := []TestCase{
-		{"Ensure required operators are installed", dscTestCtx.ValidateOperatorsInstallation},
-		{"Ensure required resources are created", dscTestCtx.ValidateResourcesCreation},
-	}
-
-	// Run the test suite.
-	RunTestCases(t, testCases)
-}
-
 // dscManagementTestSuite runs the DataScienceCluster and DSCInitialization management test suite.
 func dscManagementTestSuite(t *testing.T) {
 	t.Helper()
@@ -104,39 +78,6 @@ func dscValidationTestSuite(t *testing.T) {
 	}
 
 	RunTestCases(t, webhookTestCases)
-}
-
-// ValidateOperatorsInstallation ensures the required operators are installed.
-func (tc *DSCTestCtx) ValidateOperatorsInstallation(t *testing.T) {
-	t.Helper()
-
-	// Define operators to be installed.
-	operators := []Operator{
-		{nn: types.NamespacedName{Name: certManagerOpName, Namespace: certManagerOpNamespace}, skipOperatorGroup: false, globalOperatorGroup: true, channel: certManagerOpChannel},
-		{nn: types.NamespacedName{Name: kuadrantOpName, Namespace: kuadrantNamespace}, skipOperatorGroup: false, globalOperatorGroup: true, channel: defaultOperatorChannel},
-		{
-			nn:                  types.NamespacedName{Name: kueueOpName, Namespace: kueueOcpOperatorNamespace},
-			skipOperatorGroup:   false,
-			globalOperatorGroup: false,
-			channel:             kueueOcpOperatorChannel,
-			useOLMv1:            true,
-		},
-		{nn: types.NamespacedName{Name: leaderWorkerSetOpName, Namespace: leaderWorkerSetNamespace}, skipOperatorGroup: false, globalOperatorGroup: false, channel: leaderWorkerSetChannel}, //nolint:lll
-		{nn: types.NamespacedName{Name: jobSetOpName, Namespace: jobSetOpNamespace}, skipOperatorGroup: false, globalOperatorGroup: false, channel: jobSetOpChannel},
-	}
-
-	tc.ensureOperatorsAreInstalled(t, operators)
-}
-
-// ValidateResourcesCreation validates the creation of the required resources.
-func (tc *DSCTestCtx) ValidateResourcesCreation(t *testing.T) {
-	t.Helper()
-
-	tc.EventuallyResourceCreatedOrUpdated(
-		WithObjectToCreate(CreateJobSetOperator()),
-		WithCondition(jq.Match(`.status.conditions[] | select(.type == "Available") | .status == "True"`)),
-		WithCustomErrorMsg("Failed to create JobSetOperator resource"),
-	)
 }
 
 // ValidateDSCICreation validates the creation of a DSCInitialization.
@@ -232,19 +173,20 @@ func (tc *DSCTestCtx) ValidateDSCIWebhookAllowsValidPEMOnUpdate(t *testing.T) {
 
 	validPEM := generateTestCertPEM(t)
 
+	t.Cleanup(func() {
+		tc.EventuallyResourceCreatedOrUpdated(
+			WithMinimalObject(gvk.DSCInitialization, tc.DSCInitializationNamespacedName),
+			WithMutateFunc(setCustomCABundle("")),
+			WithCondition(jq.Match(`.spec.trustedCABundle.customCABundle == ""`)),
+			WithCustomErrorMsg("Failed to restore customCABundle to empty"),
+		)
+	})
+
 	tc.EventuallyResourceCreatedOrUpdated(
 		WithMinimalObject(gvk.DSCInitialization, tc.DSCInitializationNamespacedName),
 		WithMutateFunc(setCustomCABundle(validPEM)),
 		WithCondition(jq.Match(`.spec.trustedCABundle.customCABundle != ""`)),
 		WithCustomErrorMsg("Webhook should allow update with valid PEM in customCABundle"),
-	)
-
-	// restore customCABundle to empty
-	tc.EventuallyResourceCreatedOrUpdated(
-		WithMinimalObject(gvk.DSCInitialization, tc.DSCInitializationNamespacedName),
-		WithMutateFunc(setCustomCABundle("")),
-		WithCondition(jq.Match(`.spec.trustedCABundle.customCABundle == ""`)),
-		WithCustomErrorMsg("Failed to restore customCABundle to empty"),
 	)
 }
 
@@ -253,19 +195,20 @@ func (tc *DSCTestCtx) ValidateDSCIWebhookAllowsValidPEMOnUpdate(t *testing.T) {
 func (tc *DSCTestCtx) ValidateDSCIWebhookAllowsInvalidPEMWhenRemoved(t *testing.T) {
 	t.Helper()
 
+	t.Cleanup(func() {
+		tc.EventuallyResourceCreatedOrUpdated(
+			WithMinimalObject(gvk.DSCInitialization, tc.DSCInitializationNamespacedName),
+			WithMutateFunc(testf.Transform(`.spec.trustedCABundle.managementState = "Managed" | .spec.trustedCABundle.customCABundle = ""`)),
+			WithCondition(jq.Match(`.spec.trustedCABundle.managementState == "Managed"`)),
+			WithCustomErrorMsg("Failed to restore TrustedCABundle state"),
+		)
+	})
+
 	tc.EventuallyResourceCreatedOrUpdated(
 		WithMinimalObject(gvk.DSCInitialization, tc.DSCInitializationNamespacedName),
 		WithMutateFunc(testf.Transform(`.spec.trustedCABundle.managementState = "Removed" | .spec.trustedCABundle.customCABundle = "not-a-valid-pem"`)),
 		WithCondition(jq.Match(`.spec.trustedCABundle.managementState == "Removed" and .spec.trustedCABundle.customCABundle == "not-a-valid-pem"`)),
 		WithCustomErrorMsg("Webhook should allow invalid PEM when TrustedCABundle is Removed"),
-	)
-
-	// restore to original state
-	tc.EventuallyResourceCreatedOrUpdated(
-		WithMinimalObject(gvk.DSCInitialization, tc.DSCInitializationNamespacedName),
-		WithMutateFunc(testf.Transform(`.spec.trustedCABundle.managementState = "Managed" | .spec.trustedCABundle.customCABundle = ""`)),
-		WithCondition(jq.Match(`.spec.trustedCABundle.managementState == "Managed"`)),
-		WithCustomErrorMsg("Failed to restore TrustedCABundle state"),
 	)
 }
 
@@ -286,6 +229,18 @@ func (tc *DSCTestCtx) ValidateHardwareProfileCR(t *testing.T) {
 	)
 
 	// update default hardwareprofile to different value and check it is updated.
+	t.Cleanup(func() {
+		tc.EventuallyResourceCreatedOrUpdated(
+			WithMinimalObject(gvk.HardwareProfile, types.NamespacedName{Name: "default-profile", Namespace: tc.AppsNamespace}),
+			WithMutateFunc(testf.Transform(`
+				.spec.identifiers[0].defaultCount = 2 |
+				.metadata.annotations["opendatahub.io/managed"] = "false"
+			`)),
+			WithCondition(jq.Match(`.spec.identifiers[0].defaultCount == 2`)),
+			WithCustomErrorMsg("Failed to restore default hardware profile"),
+		)
+	})
+
 	tc.EventuallyResourceCreatedOrUpdated(
 		WithMinimalObject(gvk.HardwareProfile, types.NamespacedName{Name: "default-profile", Namespace: tc.AppsNamespace}),
 		WithMutateFunc(testf.Transform(`

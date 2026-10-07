@@ -1,7 +1,6 @@
 package e2e_test
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -14,12 +13,10 @@ import (
 	gTypes "github.com/onsi/gomega/types"
 	"github.com/opendatahub-io/odh-platform-utilities/pkg/cluster/olm"
 	configv1 "github.com/openshift/api/config/v1"
-	operatorv1 "github.com/openshift/api/operator/v1"
 	operatorsv1 "github.com/operator-framework/api/pkg/operators/v1"
 	ofapi "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	apiextv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -32,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/opendatahub-io/opendatahub-operator/v2/api/common"
-	componentApi "github.com/opendatahub-io/opendatahub-operator/v2/api/components/v1alpha1"
 	dscApi "github.com/opendatahub-io/opendatahub-operator/v2/api/datasciencecluster/v3"
 	dsciv2 "github.com/opendatahub-io/opendatahub-operator/v2/api/dscinitialization/v2"
 	serviceApi "github.com/opendatahub-io/opendatahub-operator/v2/api/services/v1alpha1"
@@ -105,30 +101,20 @@ type TestContext struct {
 //   - *TestContext: A fully initialized test context with Gomega and test options pre-configured.
 //   - error: An error if the internal test context fails to initialize.
 func NewTestContext(t *testing.T) (*TestContext, error) { //nolint:thelper
-	return newTestContext(t, nil)
-}
-
-func newTestContext(t *testing.T, ctx context.Context) (*TestContext, error) { //nolint:thelper
-	opts := []testf.TestContextOpt{
+	tcf, err := testf.NewTestContext(
 		testf.WithTOptions(
 			testf.WithEventuallyTimeout(testOpts.TestTimeouts.defaultEventuallyTimeout),
 			testf.WithEventuallyPollingInterval(testOpts.TestTimeouts.defaultEventuallyPollInterval),
 			testf.WithConsistentlyDuration(testOpts.TestTimeouts.defaultConsistentlyTimeout),
 			testf.WithConsistentlyPollingInterval(testOpts.TestTimeouts.defaultConsistentlyPollInterval),
 		),
-	}
-	if ctx != nil {
-		opts = append(opts, testf.WithContext(ctx))
-	}
-
-	tcf, err := testf.NewTestContext(opts...)
+	)
 
 	if err != nil {
 		return nil, err
 	}
 
 	// Initialize the cluster config for detecting the platform
-	//nolint:contextcheck // A cleanup context intentionally survives t.Cleanup cancellation.
 	err = cluster.Init(tcf.Context(), tcf.Client(), operatorconfig.OperatorSettings{
 		OperatorNamespace: testOpts.operatorNamespace,
 	})
@@ -814,91 +800,6 @@ func (tc *TestContext) EnsureCRDEstablished(name string) {
 		), "Expected CRD condition 'Established' to be True for CRD %s", name)
 }
 
-func (tc *TestContext) GetInstanceName(gvk schema.GroupVersionKind) string {
-	return fmt.Sprintf("default-%s", strings.ToLower(gvk.Kind))
-}
-
-func (tc *TestContext) CreateComponent(gvk schema.GroupVersionKind) *unstructured.Unstructured {
-	instanceName := tc.GetInstanceName(gvk)
-	return &unstructured.Unstructured{
-		Object: map[string]any{
-			"apiVersion": gvk.GroupVersion().String(),
-			"kind":       gvk.Kind,
-			"metadata":   map[string]any{"name": instanceName},
-			"spec":       map[string]any{},
-		},
-	}
-}
-
-// CheckComponentResourceExistsOrNotWithKind validates if a component resource's state and readiness match the expected values.
-func (tc *TestContext) CheckComponentResourceExistsOrNotWithKind(shouldExist bool, gvk schema.GroupVersionKind) {
-	instanceName := tc.GetInstanceName(gvk)
-
-	// Check if the component CR exists or not depending on the shouldExist flag
-	if shouldExist {
-		// Define common conditions to match when the component cr should exist
-		existConditions := []gTypes.GomegaMatcher{
-			// Validate the "Ready" condition for the component CR
-			jq.Match(`.status.conditions[] | select(.type == "Ready") | .status == "%s"`, metav1.ConditionTrue),
-		}
-		// Check if the component CR exists with the specified conditions
-		tc.EnsureResourceExists(
-			WithMinimalObject(gvk, types.NamespacedName{Name: instanceName}),
-			WithCondition(And(existConditions...)))
-	} else {
-		// Check if the component CR does not exist
-		tc.EnsureResourceDoesNotExist(
-			WithMinimalObject(gvk, types.NamespacedName{Name: instanceName}),
-		)
-	}
-}
-
-// UpdateComponentStateInDataScienceClusterWithKind updates the management state of a specified component kind in the DataScienceCluster.
-//
-// This function updates the component's management state in the DataScienceCluster and validates
-// that both the spec and status are updated correctly, including the component's Ready condition.
-//
-// Parameters:
-//   - state (operatorv1.ManagementState): The desired management state (e.g., Managed, Removed).
-//   - kind (string): The component kind (e.g., "Dashboard", "Workbenches").
-func (tc *TestContext) UpdateComponentStateInDataScienceClusterWithKind(state operatorv1.ManagementState, kind string) {
-	componentName, conditionKind := getComponentNameFromKind(kind)
-	var specPath string
-	switch kind {
-	case componentApi.DashboardKind:
-		specPath = ".spec.components.dashboard.standard.managementState"
-	case gvk.AIHub.Kind:
-		specPath = ".spec.components.aiHub.managementState"
-		conditionKind = "AIHub"
-	case componentApi.FeastOperatorKind:
-		specPath = ".spec.components.data.featureStore.managementState"
-		conditionKind = "Data"
-	default:
-		specPath = ".spec.components." + componentName + ".managementState"
-	}
-
-	readyCondition := metav1.ConditionFalse
-	if state == operatorv1.Managed {
-		readyCondition = metav1.ConditionTrue
-	}
-
-	// Define common conditions to match.
-	conditions := []gTypes.GomegaMatcher{
-		// Validate that the component's management state is updated correctly
-		jq.Match(`%s == "%s"`, specPath, state),
-
-		// Validate the "Ready" condition for the component
-		jq.Match(`.status.conditions[] | select(.type == "%sReady") | .status == "%s"`, conditionKind, readyCondition),
-	}
-
-	// Update the management state of the component in the DataScienceCluster.
-	tc.EventuallyResourcePatched(
-		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
-		WithMutateFunc(testf.Transform(`%s = "%s"`, specPath, state)),
-		WithCondition(And(conditions...)),
-	)
-}
-
 // EnsureOperatorInstalledWithChannel ensures that an operator is installed via OLM with a specific channel.
 //
 // This function performs the following steps:
@@ -963,12 +864,7 @@ func (tc *TestContext) EnsureOperatorHealthy(nn types.NamespacedName, channel st
 func (tc *TestContext) isOperatorHealthy(nn types.NamespacedName) bool {
 	sub, err := tc.FetchActualSubscription(nn)
 	if err != nil || sub == nil {
-		ready, ceErr := tc.isClusterExtensionReady(nn.Name)
-		if ceErr != nil {
-			tc.Logf("isOperatorHealthy: ClusterExtension check failed for %s: %v", nn.Name, ceErr)
-			return false
-		}
-		return ready
+		return false
 	}
 
 	// Determine CSV name from subscription status (supports both currentCSV and installedCSV)
@@ -994,53 +890,6 @@ func (tc *TestContext) isOperatorHealthy(nn types.NamespacedName) bool {
 	tc.convertToResource(csv, clusterServiceVersion)
 
 	return clusterServiceVersion.Status.Phase == ofapi.CSVPhaseSucceeded
-}
-
-// isClusterExtensionReady returns true if a ClusterExtension with the given name exists
-// and reports Installed=True for the current metadata.generation. Non-NotFound/non-NoMatch
-// errors are propagated.
-func (tc *TestContext) isClusterExtensionReady(name string) (bool, error) {
-	obj, err := fetchResourceSync(tc.NewResourceOptions(
-		// ClusterExtensions in this codebase are named by exact package name (e.g. "kueue-operator"),
-		// so an exact-name Get is correct here.
-		WithMinimalObject(gvk.ClusterExtension, types.NamespacedName{Name: name}),
-	))
-	if err != nil {
-		if k8serr.IsNotFound(err) || meta.IsNoMatchError(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	if obj == nil {
-		return false, nil
-	}
-	return clusterExtensionInstalledAndCurrent(obj), nil
-}
-
-// clusterExtensionInstalledAndCurrent reports Installed=True only when the condition's
-// observedGeneration matches metadata.generation. Missing or invalid generation values
-// are treated as not ready (stale status).
-func clusterExtensionInstalledAndCurrent(obj *unstructured.Unstructured) bool {
-	generation, found, err := unstructured.NestedInt64(obj.Object, "metadata", "generation")
-	if err != nil || !found {
-		return false
-	}
-	conditions, _, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
-	for _, c := range conditions {
-		condition, ok := c.(map[string]any)
-		if !ok {
-			continue
-		}
-		if condition["type"] != "Installed" || condition["status"] != "True" {
-			continue
-		}
-		observedGen, found, err := unstructured.NestedInt64(condition, "observedGeneration")
-		if err != nil || !found || observedGen != generation {
-			return false
-		}
-		return true
-	}
-	return false
 }
 
 // ensureOperatorInstalled performs operator installation, handling pre-existing resources.
@@ -1154,118 +1003,6 @@ func (tc *TestContext) ensureInstallPlan(nn types.NamespacedName, channelName st
 	}).WithTimeout(tc.TestTimeouts.olmOperationTimeout).
 		WithPolling(tc.TestTimeouts.defaultEventuallyPollInterval).
 		Should(Succeed())
-}
-
-// EnsureOperatorInstalledViaClusterExtension installs an operator via OLMv1 ClusterExtension
-// and waits for the Installed condition to become True.
-// If ClusterExtension CRD is not available on the cluster, skips installation gracefully.
-// This allows tests to continue on clusters where OLMv1 is not enabled.
-//
-//   - nn.Name      = OLM package name (also ClusterExtension resource name)
-//   - nn.Namespace = install namespace (where operator pods land)
-//   - channel      = OLM channel (e.g. "stable-v1.4")
-func (tc *TestContext) EnsureOperatorInstalledViaClusterExtension(nn types.NamespacedName, channel string) {
-	// Probe for OLMv1 availability: fetch minimal ClusterExtension to check if CRD exists
-	_, err := fetchResourceSync(tc.NewResourceOptions(
-		WithMinimalObject(gvk.ClusterExtension, types.NamespacedName{Name: "probe"}),
-	))
-
-	// If ClusterExtension CRD doesn't exist, OLMv1 is not available — fall back to OLMv0
-	if meta.IsNoMatchError(err) {
-		tc.Logf("OLMv1 not available on this cluster; falling back to OLMv0 for %s", nn.Name)
-		// Use global OperatorGroup for OLMv0 fallback since operators like Kueue require AllNamespaces mode
-		tc.EnsureOperatorInstalledWithGlobalOperatorGroupAndChannel(nn, channel)
-		return
-	}
-
-	// Fail on any other error during probe (not just missing CRD)
-	tc.g.Expect(err).NotTo(HaveOccurred(), "failed to probe for OLMv1 availability")
-
-	// OLMv1 is available, proceed with ClusterExtension install
-	tc.ensureClusterExtensionSAExists(nn)
-	tc.ensureClusterExtensionInstalled(nn, channel)
-	tc.ensureClusterExtensionReady(nn.Name)
-}
-
-// clusterExtensionSAName returns the ServiceAccount / ClusterRoleBinding name for a ClusterExtension installer.
-func clusterExtensionSAName(packageName string) string {
-	return "olmv1-installer-" + packageName
-}
-
-// ensureClusterExtensionSAExists creates the ServiceAccount and ClusterRoleBinding required
-// by ClusterExtension.spec.serviceAccount (mandatory in operator-controller v1.7.0 / OCP 4.20).
-// Uses cluster-admin for simplicity. When spec.serviceAccount is removed in
-// operator-controller v1.11 (OCP 4.22+), drop the SA and ClusterRoleBinding.
-func (tc *TestContext) ensureClusterExtensionSAExists(nn types.NamespacedName) {
-	tc.EventuallyResourceCreatedOrUpdated(
-		WithMinimalObject(gvk.Namespace, types.NamespacedName{Name: nn.Namespace}),
-	)
-	saName := clusterExtensionSAName(nn.Name)
-	tc.EventuallyResourceCreatedOrUpdated(
-		WithObjectToCreate(&corev1.ServiceAccount{
-			ObjectMeta: metav1.ObjectMeta{Name: saName, Namespace: nn.Namespace},
-		}),
-	)
-	tc.EventuallyResourceCreatedOrUpdated(
-		WithObjectToCreate(&rbacv1.ClusterRoleBinding{
-			ObjectMeta: metav1.ObjectMeta{Name: saName},
-			RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
-			Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: saName, Namespace: nn.Namespace}},
-		}),
-	)
-}
-
-// ensureClusterExtensionInstalled creates a ClusterExtension for the given operator.
-// Assumes OLMv1 is available (caller probes in EnsureOperatorInstalledViaClusterExtension).
-// Fetch-first: spec.namespace and spec.serviceAccount.name are immutable (CEL self == oldSelf).
-// EventuallyResourceCreatedOrUpdated must not be used when the resource may already exist.
-func (tc *TestContext) ensureClusterExtensionInstalled(nn types.NamespacedName, channel string) {
-	existing, err := fetchResourceSync(tc.NewResourceOptions(
-		WithMinimalObject(gvk.ClusterExtension, types.NamespacedName{Name: nn.Name}),
-	))
-	tc.g.Expect(err).NotTo(HaveOccurred())
-	if err == nil && existing != nil {
-		return
-	}
-	tc.EventuallyResourceCreatedOrUpdated(
-		WithObjectToCreate(&unstructured.Unstructured{
-			Object: map[string]any{
-				"apiVersion": "olm.operatorframework.io/v1",
-				"kind":       "ClusterExtension",
-				"metadata":   map[string]any{"name": nn.Name},
-				"spec": map[string]any{
-					"namespace":      nn.Namespace,
-					"serviceAccount": map[string]any{"name": clusterExtensionSAName(nn.Name)},
-					"source": map[string]any{
-						"sourceType": "Catalog",
-						"catalog": map[string]any{
-							"packageName": nn.Name,
-							"channels":    []any{channel},
-							"selector": map[string]any{
-								"matchLabels": map[string]any{
-									"olm.operatorframework.io/metadata.name": "openshift-redhat-operators",
-								},
-							},
-						},
-					},
-				},
-			},
-		}),
-		WithCustomErrorMsg("Failed to create ClusterExtension '%s'", nn.Name),
-	)
-}
-
-// ensureClusterExtensionReady waits for the ClusterExtension to report Installed=True
-// with observedGeneration matching metadata.generation.
-func (tc *TestContext) ensureClusterExtensionReady(name string) {
-	tc.EnsureResourceExists(
-		WithMinimalObject(gvk.ClusterExtension, types.NamespacedName{Name: name}),
-		WithCondition(jq.Match(
-			`.metadata.generation as $generation | .status.conditions[] | select(.type == "Installed") | .status == "True" and .observedGeneration == $generation`,
-		)),
-		WithCustomErrorMsg("ClusterExtension '%s' did not reach Installed=True for current generation", name),
-		WithEventuallyTimeout(tc.TestTimeouts.olmOperationTimeout),
-	)
 }
 
 // registerCleanup registers a t.Cleanup() handler that deletes a resource when the test completes.
@@ -1716,17 +1453,6 @@ func (tc *TestContext) EnsurePlatformCR(t *testing.T) {
 	)
 }
 
-// SetModuleStateInPlatformCR patches the Platform CR to set a module's
-// managementState. Used on xKS to enable/disable modules via the Platform CR.
-func (tc *TestContext) SetModuleStateInPlatformCR(t *testing.T, moduleName string, state operatorv1.ManagementState) {
-	t.Helper()
-
-	tc.EventuallyResourcePatched(
-		WithMinimalObject(gvk.Platform, tc.PlatformNamespacedName),
-		WithMutateFunc(testf.Transform(`.spec.modules.%s.managementState = "%s"`, moduleName, state)),
-	)
-}
-
 // FetchResource ensures a Kubernetes resource exists and retrieves it as an Unstructured object.
 //
 // Parameters:
@@ -1831,7 +1557,7 @@ func (tc *TestContext) CheckOperatorExists(operatorNamePrefix string) (bool, err
 	operatorInfo, err := olm.OperatorExists(tc.Context(), tc.Client(), operatorNamePrefix)
 	if err != nil {
 		if errors.Is(err, olm.ErrOperatorNotInstalled) || meta.IsNoMatchError(err) {
-			return tc.isClusterExtensionReady(operatorNamePrefix)
+			return false, nil
 		}
 		return false, err
 	}
@@ -1915,30 +1641,19 @@ func (tc *TestContext) EnsureWebhookBlocksOperation(operation func() error, oper
 	)...)
 }
 
-// UninstallOperator uninstalls an operator installed via OLMv0 (Subscription/CSV/InstallPlan)
-// and/or OLMv1 (ClusterExtension). Missing resources are ignored so this is safe for cleanup
-// regardless of which install path was used.
+// UninstallOperator uninstalls an operator by deleting its subscription and related resources.
+// This method gracefully handles missing operators and validates resource structure during uninstallation.
 //
-// OLMv0:
-//  1. Fetch Subscription if present
-//  2. Delete Subscription, then related CSV and InstallPlan
-//
-// OLMv1:
-//  1. Delete ClusterExtension named after the package (nn.Name)
-//  2. Delete the installer ServiceAccount and ClusterRoleBinding created at install time
+// The uninstallation process:
+//  1. Checks if the operator subscription exists
+//  2. Extracts related resources (CSV, InstallPlan) from subscription status
+//  3. Deletes the subscription first, then related resources
+//  4. Uses WithIgnoreNotFound for resilient cleanup
 //
 // Parameters:
-//   - operatorNamespacedName (types.NamespacedName): package/subscription name and install namespace
-//   - opts (variadic ResourceOpts): Optional resource options. ClusterExtension deletion waits
-//     by default (WithWaitForDeletion(true)); pass WithWaitForDeletion(false) to override.
+//   - operatorNamespacedName (types.NamespacedName): The namespace and name of the operator subscription
+//   - opts (variadic ResourceOpts): Optional resource options, such as WithWaitForDeletion(true)
 func (tc *TestContext) UninstallOperator(operatorNamespacedName types.NamespacedName, opts ...ResourceOpts) {
-	tc.uninstallOperatorViaSubscription(operatorNamespacedName, opts...)
-	tc.uninstallOperatorViaClusterExtension(operatorNamespacedName, opts...)
-}
-
-// uninstallOperatorViaSubscription removes OLMv0 Subscription, CSV, and InstallPlan.
-// Gracefully handles missing operators (common in cleanup).
-func (tc *TestContext) uninstallOperatorViaSubscription(operatorNamespacedName types.NamespacedName, opts ...ResourceOpts) {
 	// Construct a resource identifier.
 	resourceID := resources.FormatNamespacedName(operatorNamespacedName)
 
@@ -1993,31 +1708,6 @@ func (tc *TestContext) uninstallOperatorViaSubscription(operatorNamespacedName t
 		installPlanOpts = append(installPlanOpts, opts...) // Add user-provided options
 		tc.DeleteResource(installPlanOpts...)
 	}
-}
-
-// uninstallOperatorViaClusterExtension removes an OLMv1 ClusterExtension and its installer SA/CRB.
-// nn.Name is the ClusterExtension / package name; nn.Namespace is the install namespace for the SA.
-// Uses WithIgnoreNotFound so a missing CE (OLMv0-only install) is a no-op.
-func (tc *TestContext) uninstallOperatorViaClusterExtension(nn types.NamespacedName, opts ...ResourceOpts) {
-	// Delete ClusterExtension first and wait until it is gone — operator-controller uses the
-	// installer SA during teardown, so SA/CRB must not be removed until the CE is fully deleted.
-	// WithWaitForDeletion(true) is the default when no opts are passed; user-provided opts
-	// appended after can override it (e.g. WithWaitForDeletion(false)).
-	ceOpts := make([]ResourceOpts, 0, 3+len(opts))
-	ceOpts = append(ceOpts,
-		WithMinimalObject(gvk.ClusterExtension, types.NamespacedName{Name: nn.Name}),
-		WithIgnoreNotFound(true),
-		WithWaitForDeletion(true),
-	)
-	ceOpts = append(ceOpts, opts...) // Add user-provided options
-	tc.DeleteResource(ceOpts...)
-
-	// Delete installer SA/CRB created by ensureClusterExtensionSAExists. These are best-effort:
-	// they are installer infra (per-operator named, idempotently recreated on the next install),
-	// so a failed delete must not fail the test.
-	saName := clusterExtensionSAName(nn.Name)
-	tc.bestEffortDeleteResource(gvk.ServiceAccount, types.NamespacedName{Name: saName, Namespace: nn.Namespace})
-	tc.bestEffortDeleteResource(gvk.ClusterRoleBinding, types.NamespacedName{Name: saName})
 }
 
 // extractSubscriptionCSVName returns the CSV name referenced by a Subscription status.
@@ -2530,19 +2220,4 @@ func (tc *TestContext) ScaleCSVDeploymentReplicas(
 	}
 
 	return originalReplicas
-}
-
-func getComponentNameFromKind(kind string) (string, string) {
-	componentName := strings.ToLower(kind)
-
-	componentFieldName := componentName
-	conditionKind := kind
-	const dataSciencePipelinesKind = "DataSciencePipelines"
-	const aiPipelinesFieldName = "aipipelines"
-	if kind == dataSciencePipelinesKind {
-		componentFieldName = aiPipelinesFieldName
-		conditionKind = "AIPipelines"
-	}
-
-	return componentFieldName, conditionKind
 }

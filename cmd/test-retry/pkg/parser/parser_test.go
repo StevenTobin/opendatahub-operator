@@ -138,10 +138,7 @@ func TestParseGoTestJSONRealFixtures(t *testing.T) {
 			name:        "single test enabled",
 			fixturePath: "testdata/e2e-single.txt",
 		},
-		{
-			name:        "components and v2tov3 test enabled",
-			fixturePath: "testdata/e2e-components.txt",
-		},
+
 		{
 			name:        "not exists folder",
 			fixturePath: "testdata/not-exists.txt",

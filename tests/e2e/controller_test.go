@@ -3,7 +3,6 @@ package e2e_test
 import (
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"maps"
 	"os"
@@ -30,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	componentApi "github.com/opendatahub-io/opendatahub-operator/v2/api/components/v1alpha1"
+	dscv2 "github.com/opendatahub-io/opendatahub-operator/v2/api/datasciencecluster/v2"
 	dscApi "github.com/opendatahub-io/opendatahub-operator/v2/api/datasciencecluster/v3"
 	dsciv2 "github.com/opendatahub-io/opendatahub-operator/v2/api/dscinitialization/v2"
 	infrav1 "github.com/opendatahub-io/opendatahub-operator/v2/api/infrastructure/v1"
@@ -38,6 +38,11 @@ import (
 
 // Test function signature.
 type TestFn func(t *testing.T)
+
+const (
+	MonitoringCRName              = "default-monitoring"
+	defaultCodeFlareComponentName = "default-codeflare"
+)
 
 // DeletionPolicy type representing the deletion policy.
 type DeletionPolicy int
@@ -82,23 +87,17 @@ type TestContextConfig struct {
 	monitoringNamespace  string
 	deletionPolicy       DeletionPolicy
 
-	backupAndRestoreDSCIandDSC       bool
-	cleanUpPreviousResources         bool
-	dependantOperatorsManagementTest bool
-	dscManagementTest                bool
-	dscValidationTest                bool
-	operatorControllerTest           bool
-	operatorResilienceTest           bool
-	platformOrchestrationTest        bool
-	webhookTest                      bool
-	conversionWebhookTest            bool
-	conversionWebhookDSC             bool
-	conversionWebhookPlatform        bool
-	dagOrderingTest                  bool
-	v2tov3upgradeTest                bool
-	circuitBreakerEnabled            bool
-	circuitBreakerThreshold          int
-	TestTimeouts                     TestTimeouts
+	backupAndRestoreDSCIandDSC bool
+	cleanUpPreviousResources   bool
+	dscManagementTest          bool
+	dscValidationTest          bool
+	operatorControllerTest     bool
+	operatorResilienceTest     bool
+	webhookTest                bool
+	dagOrderingTest            bool
+	circuitBreakerEnabled      bool
+	circuitBreakerThreshold    int
+	TestTimeouts               TestTimeouts
 }
 
 // TestGroup defines the test groups.
@@ -112,8 +111,8 @@ type TestGroup struct {
 
 type TestTimeouts struct {
 	// Generic tiers
-	defaultEventuallyTimeout        time.Duration
-	shortEventuallyTimeout          time.Duration
+	defaultEventuallyTimeout time.Duration
+
 	mediumEventuallyTimeout         time.Duration
 	longEventuallyTimeout           time.Duration
 	defaultEventuallyPollInterval   time.Duration
@@ -123,11 +122,8 @@ type TestTimeouts struct {
 	// Named operation-specific tiers
 	crCreationTimeout         time.Duration // DSCI/DSC creation and readiness
 	componentReadinessTimeout time.Duration // Component enabled/disabled checks
-	monitoringStackTimeout    time.Duration // Monitoring stack readiness (Prometheus, Tempo, OLM-dependent)
 	authGatewayTimeout        time.Duration // Auth/gateway configuration checks
-	deletionRecoveryTimeout   time.Duration // Resource deletion and controller recreation
 	olmOperationTimeout       time.Duration // CSV succeeded, InstallPlan approval
-	operandReadinessTimeout   time.Duration // Operand deployments reaching ready state
 }
 
 type TestCase struct {
@@ -139,62 +135,13 @@ var (
 	Scheme   = runtime.NewScheme()
 	testOpts = TestContextConfig{}
 
-	platformComponentFlags []string
-
-	// Deprecated: per-component test suites are superseded by platformOrchestrationTestSuite.
-	// Remove once modularisation is complete and platform orchestration covers all components.
-	Components = TestGroup{
-		name:     "components",
-		enabled:  true,
-		parallel: true,
-		scenarios: []map[string]TestFn{
-			{
-				componentApi.DashboardComponentName:            dashboardTestSuite,
-				componentApi.RayComponentName:                  rayTestSuite,
-				componentApi.TrainerComponentName:              trainerTestSuite,
-				componentApi.AIPipelinesComponentName:          aiPipelinesTestSuite,
-				componentApi.WorkbenchesComponentName:          workbenchesTestSuite,
-				componentApi.KserveComponentName:               kserveTestSuite,
-				componentApi.DataModuleName:                    dataModuleTestSuite,
-				componentApi.OGXComponentName:                  ogxTestSuite,
-				componentApi.SparkOperatorComponentName:        sparkOperatorTestSuite,
-				componentApi.AIGatewayComponentName:            aiGatewayTestSuite,
-				componentApi.MCPLifecycleOperatorComponentName: mcpLifecycleOperatorTestSuite,
-				componentApi.DatabaseServiceComponentName:      databaseServiceTestSuite,
-			},
-			{
-				// Kueue tests depends on Workbenches, so must not run with Workbenches tests in parallel
-				componentApi.KueueComponentName: kueueTestSuite,
-				// AIHub and Kserve are coupled, so must not run with Kserve tests in parallel
-				componentApi.AIHubModuleName: aihubTestSuite,
-			},
-			{
-				// TrustyAI tests depends on KServe, so must not run with Kserve tests in parallel
-				componentApi.TrustyAIComponentName: trustyAITestSuite,
-				// MLflowOperator tests should not run in parallel with Workbenches tests, as Workbenches tests integration with MLflowOperator
-				componentApi.MLflowOperatorComponentName: mlflowOperatorTestSuite,
-			},
-			{
-				// run external operator degraded monitoring tests isolated from other component tests
-				componentApi.KserveComponentName:  kserveDegradedMonitoringTestSuite,
-				componentApi.KueueComponentName:   kueueDegradedMonitoringTestSuite,
-				componentApi.TrainerComponentName: trainerDegradedMonitoringTestSuite,
-			},
-			{
-				// ModelCache tests modify namespace PSA labels, so must not run with other KServe tests in parallel
-				componentApi.KserveComponentName + "-modelcache": kserveModelCacheTestSuite,
-			},
-		},
-	}
-
 	Services = TestGroup{
 		name:     "services",
 		enabled:  true,
 		parallel: true,
 		scenarios: []map[string]TestFn{{
-			serviceApi.MonitoringServiceName: monitoringTestSuite,
-			serviceApi.AuthServiceName:       authControllerTestSuite,
-			serviceApi.GatewayServiceName:    gatewayTestSuite,
+			serviceApi.AuthServiceName:    authControllerTestSuite,
+			serviceApi.GatewayServiceName: gatewayTestSuite,
 		}},
 	}
 )
@@ -215,46 +162,6 @@ func (i *arrayFlags) Set(value string) error {
 
 func (tg *TestGroup) String() string {
 	return tg.name
-}
-
-func dumpResolvedFlags(w io.Writer, config *viper.Viper, flags *pflag.FlagSet) error {
-	var names []string
-	flags.VisitAll(func(flag *pflag.Flag) {
-		names = append(names, flag.Name)
-	})
-	slices.Sort(names)
-
-	if _, err := fmt.Fprintln(w, "Resolved E2E flags:"); err != nil {
-		return err
-	}
-	for _, name := range names {
-		value := config.Get(name)
-		if value == nil {
-			if flag := flags.Lookup(name); flag != nil {
-				value = flag.Value.String()
-			}
-		}
-		if isSensitiveFlag(name) {
-			value = "[REDACTED]"
-		}
-		if _, err := fmt.Fprintf(w, "  --%s=%v\n", name, value); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func isSensitiveFlag(name string) bool {
-	name = strings.ToLower(name)
-	for _, marker := range []string{
-		"token", "password", "secret", "credential", "private-key", "private_key", "api-key", "api_key", "access-key", "access_key",
-	} {
-		if strings.Contains(name, marker) {
-			return true
-		}
-	}
-	return false
 }
 
 func (tg *TestGroup) Names() []string {
@@ -500,10 +407,6 @@ func TestOdhOperator(t *testing.T) {
 	if testOpts.cleanUpPreviousResources {
 		CleanupPreviousTestResources(t)
 	}
-	// Remove any leftover MLflow instances from previous test runs which might have been created by previous components
-	// when running within DevTestOps pipeline. CleanupPreviousTestResources is disabled in that pipeline, so this has
-	// to run separately.
-	cleanupStaleMLflowInstances(t)
 
 	if collector := startMetricsCollectorIfEnabled(); collector != nil {
 		defer collector.Stop()
@@ -512,10 +415,6 @@ func TestOdhOperator(t *testing.T) {
 	if tc, err := NewTestContext(t); err == nil && tc.IsXKS() {
 		tc.EnsurePlatformCR(t)
 		tc.EnsureGatewayConfigForXKS(t)
-	}
-
-	if testOpts.dependantOperatorsManagementTest {
-		mustRun(t, "Dependant Operators Management E2E Tests", dependantOperatorsManagementTestSuite)
 	}
 
 	if testOpts.dscManagementTest {
@@ -533,47 +432,17 @@ func TestOdhOperator(t *testing.T) {
 		mustRun(t, "DSCInitialization and DataScienceCluster validation E2E Tests", dscValidationTestSuite)
 	}
 
-	// Run DAG ordering tests before individual component tests to verify
-	// the unified batch provisioning order on a clean DSC.
+	// Run the unified DAG ordering and module contract suite on a clean DSC.
 	if testOpts.dagOrderingTest {
 		mustRun(t, "DAG Ordering E2E Tests", dagOrderingTestSuite)
 	}
 
-	// Run monitoring before components — monitoring setup is a prerequisite.
-	mustRun(t, serviceApi.MonitoringServiceName, Services.RunSingle(serviceApi.MonitoringServiceName))
-
-	if testOpts.platformOrchestrationTest {
-		mustRun(t, "Platform Orchestration E2E Tests", platformOrchestrationTestSuite)
-	}
-
-	// Run components test suites
-	mustRun(t, Components.String(), Components.Run)
-
-	// Run remaining services (auth, gateway)
-	mustRun(t, Services.String(), Services.RunExcluding(serviceApi.MonitoringServiceName))
+	// Run services (auth, gateway).
+	mustRun(t, Services.String(), Services.Run)
 
 	// Run operator resilience test suites after functional tests
 	if testOpts.operatorResilienceTest {
 		mustRun(t, "Operator Resilience E2E Tests", operatorResilienceTestSuite)
-	}
-
-	// Run DSCI deprecated-CRD regression tests.
-	if testOpts.v2tov3upgradeTest {
-		mustRun(t, "DSCI deprecated-CRD E2E Tests", dscInitializationDeprecatedCRDTestSuite)
-	}
-
-	// Run ConfigMap deletion test suite
-	if testOpts.operatorControllerTest {
-		// this is a negative test case, since by using the positive CM('true'), even CSV gets deleted which leaves no operator pod in prow
-		mustRun(t, "Deletion ConfigMap E2E Tests", cfgMapDeletionTestSuite)
-	}
-
-	// Conversion scenarios delete the singleton DSC. Run them after functional tests.
-	if conversionWebhookSuiteSelected() {
-		mustRun(t, "webhooks", func(t *testing.T) {
-			t.Helper()
-			t.Run("conversion", webhookConversionTestSuite)
-		})
 	}
 
 	// Deletion logic based on deletionPolicy
@@ -614,8 +483,8 @@ func TestMain(m *testing.M) {
 	// Gomega default values for Eventually/Consistently can be found here:
 	// https://onsi.github.io/gomega/#making-asynchronous-assertions
 	// Generic tiers
-	viper.SetDefault("defaultEventuallyTimeout", "5m")        // Timeout used for Eventually; overrides Gomega's default of 1 second.
-	viper.SetDefault("shortEventuallyTimeout", "10s")         // Timeout used for Eventually; overrides Gomega's default of 1 second.
+	viper.SetDefault("defaultEventuallyTimeout", "5m") // Timeout used for Eventually; overrides Gomega's default of 1 second.
+
 	viper.SetDefault("mediumEventuallyTimeout", "7m")         // Medium timeout: for readiness checks (e.g., ClusterServiceVersion, DataScienceCluster).
 	viper.SetDefault("longEventuallyTimeout", "10m")          // Long timeout: for more complex readiness (e.g., DSCInitialization, KServe).
 	viper.SetDefault("defaultEventuallyPollInterval", "10s")  // Polling interval for Eventually; overrides Gomega's default of 10 milliseconds.
@@ -625,11 +494,8 @@ func TestMain(m *testing.M) {
 	// Named operation-specific tiers — defaults based on CI observability data
 	viper.SetDefault("crCreationTimeout", "2m")         // DSCI/DSC creation and readiness (P99=71s, observed avg ~10s).
 	viper.SetDefault("componentReadinessTimeout", "3m") // Component enabled/disabled checks (P99=93s, outliers at 243s).
-	viper.SetDefault("monitoringStackTimeout", "10m")   // Monitoring stack readiness (P99=292s, TLS_Fix/ThanosQuerier pass at 5-6min).
 	viper.SetDefault("authGatewayTimeout", "5m")        // Auth/gateway checks (72 passes exceed 2min, max 265s — do not reduce).
-	viper.SetDefault("deletionRecoveryTimeout", "90s")  // Resource deletion and controller recreation (P99=46s, nothing above 90s).
 	viper.SetDefault("olmOperationTimeout", "2m")       // CSV succeeded, InstallPlan approval (P99=81s, nothing above 120s).
-	viper.SetDefault("operandReadinessTimeout", "2m")   // Operand deployments reaching ready state (P99=56s, outliers at 90s).
 
 	// Flags
 	pflag.String("operator-namespace", "opendatahub-operator-system", "Namespace where the odh operator is deployed")
@@ -657,29 +523,17 @@ func TestMain(m *testing.M) {
 	checkEnvVarBindingError(viper.BindEnv("clean-up-previous-resources", viper.GetEnvPrefix()+"_CLEAN_UP_PREVIOUS_RESOURCES"))
 	pflag.Bool("test-operator-controller", true, "run operator controller tests")
 	checkEnvVarBindingError(viper.BindEnv("test-operator-controller", viper.GetEnvPrefix()+"_OPERATOR_CONTROLLER"))
-	pflag.Bool("test-dependant-operators-management", true, "run dependant operators management tests")
-	checkEnvVarBindingError(viper.BindEnv("test-dependant-operators-management", viper.GetEnvPrefix()+"_DEPENDANT_OPERATORS_MANAGEMENT"))
+
 	pflag.Bool("test-dsc-management", true, "run DSCI/DSC management tests")
 	checkEnvVarBindingError(viper.BindEnv("test-dsc-management", viper.GetEnvPrefix()+"_DSC_MANAGEMENT"))
 	pflag.Bool("test-dsc-validation", true, "run DSCI/DSC validation tests")
 	checkEnvVarBindingError(viper.BindEnv("test-dsc-validation", viper.GetEnvPrefix()+"_DSC_VALIDATION"))
 	pflag.Bool("test-operator-resilience", true, "run operator resilience tests")
 	checkEnvVarBindingError(viper.BindEnv("test-operator-resilience", viper.GetEnvPrefix()+"_OPERATOR_RESILIENCE"))
-	pflag.Bool("test-platform-orchestration", true, "run platform orchestration contract tests")
-	checkEnvVarBindingError(viper.BindEnv("test-platform-orchestration", viper.GetEnvPrefix()+"_PLATFORM_ORCHESTRATION"))
-	pflag.StringSlice("test-platform-component", nil, "filter platform orchestration tests to specific components (e.g. dashboard,kserve)")
-	checkEnvVarBindingError(viper.BindEnv("test-platform-component", viper.GetEnvPrefix()+"_PLATFORM_COMPONENT"))
-	pflag.Bool("test-operator-v2tov3upgrade", true, "run V2 to V3 upgrade tests")
-	checkEnvVarBindingError(viper.BindEnv("test-operator-v2tov3upgrade", viper.GetEnvPrefix()+"_OPERATOR_V2TOV3UPGRADE"))
+
 	pflag.Bool("test-webhook", true, "run webhook tests")
 	checkEnvVarBindingError(viper.BindEnv("test-webhook", viper.GetEnvPrefix()+"_WEBHOOK"))
-	pflag.Bool("test-conversion-webhook", true, "run conversion webhook tests")
-	checkEnvVarBindingError(viper.BindEnv("test-conversion-webhook", viper.GetEnvPrefix()+"_CONVERSION_WEBHOOK"))
-	pflag.Bool("test-conversion-webhook-dsc", true, "run DSC conversion webhook tests")
-	checkEnvVarBindingError(viper.BindEnv("test-conversion-webhook-dsc", viper.GetEnvPrefix()+"_CONVERSION_WEBHOOK_DSC"))
-	pflag.Bool("test-conversion-webhook-platform", true, "run Platform conversion webhook tests")
-	checkEnvVarBindingError(viper.BindEnv("test-conversion-webhook-platform", viper.GetEnvPrefix()+"_CONVERSION_WEBHOOK_PLATFORM"))
-	pflag.Bool("test-dag-ordering", true, "run DAG upgrade ordering tests")
+	pflag.Bool("test-dag-ordering", true, "run DAG ordering and module contract tests")
 	checkEnvVarBindingError(viper.BindEnv("test-dag-ordering", viper.GetEnvPrefix()+"_DAG_ORDERING"))
 
 	pflag.Bool("circuit-breaker", true, "enable circuit breaker to halt tests on infrastructure failures")
@@ -687,23 +541,12 @@ func TestMain(m *testing.M) {
 	pflag.Int("circuit-breaker-threshold", 3, "consecutive test failures before health-checking for infrastructure problems")
 	checkEnvVarBindingError(viper.BindEnv("circuit-breaker-threshold", viper.GetEnvPrefix()+"_CIRCUIT_BREAKER_THRESHOLD"))
 
-	// Component flags
-	componentNames := strings.Join(Components.Names(), ", ")
-	pflag.Bool("test-components", Components.enabled, "Enable testing of individual components specified by --test-component flag")
-	checkEnvVarBindingError(viper.BindEnv("test-components", viper.GetEnvPrefix()+"_COMPONENTS"))
-	pflag.StringSlice("test-component", Components.Names(), "Run tests for the specified component. Valid names: "+componentNames)
-	checkEnvVarBindingError(viper.BindEnv("test-component", viper.GetEnvPrefix()+"_COMPONENT"))
-	pflag.Bool("test-components-parallel", Components.parallel, "Run component test suites in parallel")
-	checkEnvVarBindingError(viper.BindEnv("test-components-parallel", viper.GetEnvPrefix()+"_COMPONENTS_PARALLEL"))
-
 	// Service flags
 	serviceNames := strings.Join(Services.Names(), ", ")
 	pflag.Bool("test-services", Services.enabled, "Enable testing of individual services specified by --test-service flag")
 	checkEnvVarBindingError(viper.BindEnv("test-services", viper.GetEnvPrefix()+"_SERVICES"))
 	pflag.StringSlice("test-service", Services.Names(), "Run tests for the specified service. Valid names: "+serviceNames)
 	checkEnvVarBindingError(viper.BindEnv("test-service", viper.GetEnvPrefix()+"_SERVICE"))
-	pflag.Bool("test-services-parallel", Services.parallel, "Run service test suites in parallel")
-	checkEnvVarBindingError(viper.BindEnv("test-services-parallel", viper.GetEnvPrefix()+"_SERVICES_PARALLEL"))
 
 	pflag.CommandLine.AddGoFlagSet(flag.CommandLine)
 
@@ -718,14 +561,11 @@ func TestMain(m *testing.M) {
 		fmt.Printf("Error in binding tests flags: %s", err.Error())
 		os.Exit(1)
 	}
-	if err := dumpResolvedFlags(os.Stdout, viper.GetViper(), pflag.CommandLine); err != nil {
-		log.Printf("Failed to dump resolved E2E flags: %v", err)
-	}
 
 	testOpts.TestTimeouts = TestTimeouts{
 		// Generic tiers
-		defaultEventuallyTimeout:        viper.GetDuration("defaultEventuallyTimeout"),
-		shortEventuallyTimeout:          viper.GetDuration("shortEventuallyTimeout"),
+		defaultEventuallyTimeout: viper.GetDuration("defaultEventuallyTimeout"),
+
 		mediumEventuallyTimeout:         viper.GetDuration("mediumEventuallyTimeout"),
 		longEventuallyTimeout:           viper.GetDuration("longEventuallyTimeout"),
 		defaultEventuallyPollInterval:   viper.GetDuration("defaultEventuallyPollInterval"),
@@ -734,11 +574,8 @@ func TestMain(m *testing.M) {
 		// Named operation-specific tiers
 		crCreationTimeout:         viper.GetDuration("crCreationTimeout"),
 		componentReadinessTimeout: viper.GetDuration("componentReadinessTimeout"),
-		monitoringStackTimeout:    viper.GetDuration("monitoringStackTimeout"),
 		authGatewayTimeout:        viper.GetDuration("authGatewayTimeout"),
-		deletionRecoveryTimeout:   viper.GetDuration("deletionRecoveryTimeout"),
 		olmOperationTimeout:       viper.GetDuration("olmOperationTimeout"),
-		operandReadinessTimeout:   viper.GetDuration("operandReadinessTimeout"),
 	}
 	testOpts.tag = viper.GetString("tag")
 	if !slices.Contains(allowedTags, TestTag(testOpts.tag)) {
@@ -757,34 +594,19 @@ func TestMain(m *testing.M) {
 	}
 	testOpts.cleanUpPreviousResources = viper.GetBool("clean-up-previous-resources")
 	testOpts.operatorControllerTest = viper.GetBool("test-operator-controller")
-	testOpts.dependantOperatorsManagementTest = viper.GetBool("test-dependant-operators-management")
+
 	testOpts.dscManagementTest = viper.GetBool("test-dsc-management")
 	testOpts.dscValidationTest = viper.GetBool("test-dsc-validation")
 	testOpts.operatorResilienceTest = viper.GetBool("test-operator-resilience")
-	testOpts.platformOrchestrationTest = viper.GetBool("test-platform-orchestration")
-	platformComponentFlags = viper.GetStringSlice("test-platform-component")
-	testOpts.v2tov3upgradeTest = viper.GetBool("test-operator-v2tov3upgrade")
+
 	testOpts.webhookTest = viper.GetBool("test-webhook")
-	testOpts.conversionWebhookTest = viper.GetBool("test-conversion-webhook")
-	testOpts.conversionWebhookDSC = viper.GetBool("test-conversion-webhook-dsc")
-	testOpts.conversionWebhookPlatform = viper.GetBool("test-conversion-webhook-platform")
 	testOpts.dagOrderingTest = viper.GetBool("test-dag-ordering")
 	testOpts.circuitBreakerEnabled = viper.GetBool("circuit-breaker")
 	testOpts.circuitBreakerThreshold = viper.GetInt("circuit-breaker-threshold")
-
-	Components.enabled = viper.GetBool("test-components")
-	Components.flags = viper.GetStringSlice("test-component")
-	Components.parallel = viper.GetBool("test-components-parallel")
 	Services.enabled = viper.GetBool("test-services")
 	Services.flags = viper.GetStringSlice("test-service")
-	Services.parallel = viper.GetBool("test-services-parallel")
 
 	// Config validation
-	if err := Components.Validate(); err != nil {
-		fmt.Printf("test-component: %s", err.Error())
-		os.Exit(1)
-	}
-
 	if err := Services.Validate(); err != nil {
 		fmt.Printf("test-service: %s", err.Error())
 		os.Exit(1)
@@ -802,7 +624,9 @@ func registerSchemes() {
 		apiextv1.AddToScheme,
 		autoscalingv1.AddToScheme,
 		dsciv2.AddToScheme,
+		dscv2.AddToScheme,
 		dscApi.AddToScheme,
+
 		monitoringv1.AddToScheme,
 		ofapi.AddToScheme,
 		operatorv1.AddToScheme,

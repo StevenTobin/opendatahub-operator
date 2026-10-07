@@ -198,6 +198,17 @@ func TestGetRunlevelPolicy_DefaultApplied(t *testing.T) {
 	assert.Equal(t, dag.DefaultTimeout, policy.Timeout, "unlisted runlevel should get default")
 }
 
+func TestSetDefaultTimeout(t *testing.T) {
+	original := dag.GetDefaultTimeout()
+	t.Cleanup(func() { dag.SetDefaultTimeout(original) })
+
+	custom := 30 * time.Second
+	dag.SetDefaultTimeout(custom)
+
+	assert.Equal(t, custom, dag.GetDefaultTimeout())
+	assert.Equal(t, custom, dag.GetRunlevelPolicy(42).Timeout)
+}
+
 func TestGetRunlevelPolicy_OverrideTakesPrecedence(t *testing.T) {
 	dag.SetRunlevelPolicy(77, dag.RunlevelPolicy{Timeout: 0})
 	defer dag.ClearRunlevelPolicy(77)

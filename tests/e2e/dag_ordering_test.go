@@ -1,6 +1,7 @@
 package e2e_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -11,279 +12,113 @@ import (
 	operatorv1 "github.com/openshift/api/operator/v1"
 	ofapi "github.com/operator-framework/api/pkg/operators/v1alpha1"
 	"github.com/stretchr/testify/require"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	componentApi "github.com/opendatahub-io/opendatahub-operator/v2/api/components/v1alpha1"
-	dscApi "github.com/opendatahub-io/opendatahub-operator/v2/api/datasciencecluster/v3"
-	serviceApi "github.com/opendatahub-io/opendatahub-operator/v2/api/services/v1alpha1"
+	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules"
+	modulebuiltin "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules/builtin"
 	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/status"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster/gvk"
+	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/controller/dag"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/controller/gates"
-	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/controller/precondition"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/utils/test/matchers/jq"
-	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/utils/test/testf"
 
 	. "github.com/onsi/gomega"
 )
 
 type DAGOrderingTestCtx struct {
 	*TestContext
+
+	contractReport *moduleContractReport
 }
 
-type componentBatch struct {
-	name       string
-	runlevel   int
-	components []componentEntry
+type moduleRegistrationNode struct {
+	modulebuiltin.ModuleRegistration
 }
 
-type componentEntry struct {
-	name           string
-	gvk            schema.GroupVersionKind
-	Enable         func(*dscApi.DataScienceCluster)
-	Disable        func(*dscApi.DataScienceCluster)
-	internal       bool // components whose CR may not exist in the test (webhook-blocked, auto-created, etc.)
-	dsciConfigured bool // configured via DSCI spec, not DSC — cleanup requires patching DSCI
+func (n moduleRegistrationNode) GetName() string {
+	return n.Handler.GetName()
 }
 
-// dagBatches mirrors the runlevel assignments from cmd/main.go.
-// The ordering here defines the expected provisioning order.
-var dagBatches = []componentBatch{
-	{
-		name:     "Batch20",
-		runlevel: 20,
-		components: []componentEntry{
-			{
-				name:     componentApi.DashboardComponentName,
-				gvk:      gvk.Dashboard,
-				internal: true,
-				Enable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.Dashboard.Standard.ManagementState = operatorv1.Managed
-					dsc.Spec.Components.Dashboard.MaaSPortal.ManagementState = operatorv1.Removed
-				},
-				Disable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.Dashboard.Standard.ManagementState = operatorv1.Removed
-					dsc.Spec.Components.Dashboard.MaaSPortal.ManagementState = operatorv1.Removed
-				},
-			},
-			{
-				name:           serviceApi.MonitoringServiceName,
-				gvk:            gvk.Monitoring,
-				internal:       true,
-				dsciConfigured: true,
-			},
-			{
-				name:     componentApi.AIPipelinesComponentName,
-				gvk:      gvk.AIPipelines,
-				internal: true,
-				Enable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.AIPipelines.ManagementState = operatorv1.Managed
-				},
-				Disable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.AIPipelines.ManagementState = operatorv1.Removed
-				},
-			},
-			// AIHub is an out-of-tree module whose CR is the shared
-			// cluster-scoped AIHub singleton "default-aihub"; it is referenced
-			// directly via gvk.AIHub and routed through the module-readiness
-			// (Ready=True) path like the other modules (mlflow, spark).
-			{
-				name:     componentApi.AIHubModuleName,
-				gvk:      gvk.AIHub,
-				internal: true,
-				Enable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.AIHub.ManagementState = operatorv1.Managed
-				},
-				Disable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.AIHub.ManagementState = operatorv1.Removed
-				},
-			},
-			{
-				name:     componentApi.RayComponentName,
-				gvk:      gvk.Ray,
-				internal: true,
-				Enable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.Ray.ManagementState = operatorv1.Managed
-				},
-				Disable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.Ray.ManagementState = operatorv1.Removed
-				},
-			},
-			{
-				name:     componentApi.TrainerComponentName,
-				gvk:      gvk.Trainer,
-				internal: true,
-				Enable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.Trainer.ManagementState = operatorv1.Managed
-				},
-				Disable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.Trainer.ManagementState = operatorv1.Removed
-				},
-			},
-			{
-				name:     componentApi.WorkbenchesComponentName,
-				gvk:      gvk.Workbenches,
-				internal: true,
-				Enable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.Workbenches.ManagementState = operatorv1.Managed
-				},
-				Disable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.Workbenches.ManagementState = operatorv1.Removed
-				},
-			},
-			{
-				name:     componentApi.MCPLifecycleOperatorComponentName,
-				gvk:      gvk.MCPLifecycleOperator,
-				internal: true,
-				Enable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.MCPLifecycleOperator.ManagementState = operatorv1.Managed
-				},
-				Disable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.MCPLifecycleOperator.ManagementState = operatorv1.Removed
-				},
-			},
-		},
-	},
-	{
-		name:     "Batch31",
-		runlevel: 31,
-		components: []componentEntry{
-			{
-				name:     componentApi.KserveComponentName,
-				gvk:      gvk.Kserve,
-				internal: true,
-				Enable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.Kserve.ManagementState = operatorv1.Managed
-				},
-				Disable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.Kserve.ManagementState = operatorv1.Removed
-				},
-			},
-			{
-				name:     componentApi.KueueComponentName,
-				gvk:      gvk.Kueue,
-				internal: true,
-				Enable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.Kueue.ManagementState = operatorv1.Managed
-				},
-				Disable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.Kueue.ManagementState = operatorv1.Removed
-				},
-			},
-		},
-	},
-	{
-		name:     "Batch32",
-		runlevel: 32,
-		components: []componentEntry{
-			{
-				name:     componentApi.DataModuleName,
-				gvk:      gvk.FeastOperator,
-				internal: true,
-				Enable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.Data.FeatureStore.ManagementState = operatorv1.Managed
-					dsc.Spec.Components.Data.DataRegistry.ManagementState = operatorv1.Removed
-				},
-				Disable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.Data.FeatureStore.ManagementState = operatorv1.Removed
-					dsc.Spec.Components.Data.DataRegistry.ManagementState = operatorv1.Removed
-				},
-			},
-			{
-				name:     componentApi.MLflowOperatorComponentName,
-				gvk:      gvk.MLflowOperator,
-				internal: true,
-				Enable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.MLflowOperator.ManagementState = operatorv1.Managed
-				},
-				Disable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.MLflowOperator.ManagementState = operatorv1.Removed
-				},
-			},
-			{
-				name:     componentApi.OGXComponentName,
-				gvk:      gvk.OGX,
-				internal: true,
-				Enable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.OGX.ManagementState = operatorv1.Managed
-				},
-				Disable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.OGX.ManagementState = operatorv1.Removed
-				},
-			},
-			{
-				name:     componentApi.SparkOperatorComponentName,
-				gvk:      gvk.SparkOperator,
-				internal: true,
-				Enable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.SparkOperator.ManagementState = operatorv1.Managed
-				},
-				Disable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.SparkOperator.ManagementState = operatorv1.Removed
-				},
-			},
-			{
-				name:     componentApi.AIGatewayComponentName,
-				gvk:      gvk.AIGateway,
-				internal: true,
-				Enable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.AIGateway.ManagementState = operatorv1.Managed
-				},
-				Disable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.AIGateway.ManagementState = operatorv1.Removed
-				},
-			},
-		},
-	},
-	{
-		name:     "Batch33",
-		runlevel: 33,
-		components: []componentEntry{
-			{
-				name:     componentApi.TrustyAIComponentName,
-				gvk:      gvk.TrustyAI,
-				internal: true,
-				Enable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.TrustyAI.ManagementState = operatorv1.Managed
-				},
-				Disable: func(dsc *dscApi.DataScienceCluster) {
-					dsc.Spec.Components.TrustyAI.ManagementState = operatorv1.Removed
-				},
-			},
-		},
-	},
+func (n moduleRegistrationNode) GetRunlevel() dag.Runlevel {
+	return n.Runlevel
 }
 
-// dscComponentsExcludedFromManagedDAGTests lists component names skipped
-// when enabling all components during DAG tests.
-var dscComponentsExcludedFromManagedDAGTests = []string{
-	componentApi.KueueComponentName, // validating webhook rejects managementState=Managed
+func productionModuleBatches() ([][]moduleRegistrationNode, error) {
+	graph := dag.NewGraph[moduleRegistrationNode]()
+	for _, registration := range modulebuiltin.Registrations() {
+		graph.Add(moduleRegistrationNode{ModuleRegistration: registration})
+	}
+	return graph.Resolve()
 }
 
-// extensionGVKs lists in-tree component CRs at RL 31+ whose controllers
-// write PlatformReady via RunlevelGateAction. Fully-modularized components
-// (Kserve, Data, MLflowOperator, SparkOperator, TrustyAI) are
-// excluded — they have no in-tree controller to write PlatformReady.
-var extensionGVKs = []schema.GroupVersionKind{}
+func managedDAGTestDSCComponentFields() []string {
+	registrations := modulebuiltin.Registrations()
+	fields := make([]string, 0, len(registrations))
+	for _, registration := range registrations {
+		if registration.ConfigSource == modules.ConfigFromDSC {
+			fields = append(fields, dscComponentField(registration.Handler.GetName()))
+		}
+	}
+	slices.Sort(fields)
+	return slices.Compact(fields)
+}
+
+// allDAGTestDSCComponentFields returns the component keys in the v3 DSC API.
+// Keep this list independent of the v2 compatibility API: v2 uses separate
+// feastoperator/modelregistry fields, while v3 exposes them as data/aiHub.
+func allDAGTestDSCComponentFields() []string {
+	return []string{
+		"aiHub",
+		"aigateway",
+		"aipipelines",
+		"dashboard",
+		"data",
+		"databaseservice",
+		"kserve",
+		"kueue",
+		"mcplifecycleoperator",
+		"mlflowoperator",
+		"ogx",
+		"ray",
+		"sparkoperator",
+		"trainer",
+		"trustyai",
+		"workbenches",
+	}
+}
+
+func dscComponentField(moduleName string) string {
+	switch moduleName {
+	case componentApi.FeastOperatorComponentName:
+		return "data"
+	case componentApi.ModelRegistryComponentName:
+		return "aiHub"
+	default:
+		return moduleName
+	}
+}
 
 const (
-	dagQuotaName   = "dag-test-restrictive-quota"
-	dagTestVersion = "99.0.0-dag-test"
+	dagQuotaName                    = "dag-test-restrictive-quota"
+	dagOperatorEnvSnapshotConfigMap = "e2e-dag-operator-env-snapshot"
+	dagTestVersion                  = "99.0.0-dag-test"
+	dagRunlevelTimeoutEnv           = "ODH_DAG_RUNLEVEL_TIMEOUT"
+	dagE2ERunlevelTimeout           = 5 * time.Minute
 )
 
-// dagOrderingTestSuite runs the DAG runlevel gating test suite. OpenShift
-// and xKS clusters enable components through different resources (the
-// DataScienceCluster on OpenShift, the Platform CR directly on xKS, which
-// has no DataScienceCluster), so each cluster type runs its own set of
-// scenarios below.
+// dagOrderingTestSuite runs the OpenShift DAG and registered-module contract suite.
+// xKS contract coverage is intentionally deferred to a separate future suite.
 func dagOrderingTestSuite(t *testing.T) {
 	t.Helper()
 
@@ -292,25 +127,16 @@ func dagOrderingTestSuite(t *testing.T) {
 	tc, err := NewTestContext(t)
 	require.NoError(t, err, "Failed to initialize test context")
 
-	ctx := DAGOrderingTestCtx{TestContext: tc}
+	ctx := DAGOrderingTestCtx{
+		TestContext:    tc,
+		contractReport: &moduleContractReport{},
+	}
 
 	if tc.IsXKS() {
-		ctx.runXKSTestCases(t)
-		return
+		t.Skip("xKS module contract coverage is out of scope for this suite")
 	}
 
 	ctx.runOpenShiftTestCases(t)
-}
-
-// runXKSTestCases exercises DAG runlevel gating on xKS clusters, which
-// have no DataScienceCluster. Component enablement and runlevel gating
-// both go through the Platform CR on this platform.
-func (tc *DAGOrderingTestCtx) runXKSTestCases(t *testing.T) {
-	t.Helper()
-
-	RunTestCases(t, []TestCase{
-		{"Validate Kserve DAG gating unblocks via Platform CR", tc.ValidateXKSRunlevelGating},
-	})
 }
 
 // runOpenShiftTestCases exercises DAG runlevel gating on OpenShift
@@ -319,33 +145,29 @@ func (tc *DAGOrderingTestCtx) runXKSTestCases(t *testing.T) {
 func (tc *DAGOrderingTestCtx) runOpenShiftTestCases(t *testing.T) {
 	t.Helper()
 
+	tc.ensureOperatorPrerequisites(t)
+
+	envSnapshot := tc.restorePersistedOperatorEnvSnapshot(t)
+	if envSnapshot == nil {
+		envSnapshot = tc.snapshotOperatorEnvVars(t, "RHAI_VERSION", "CI", dagRunlevelTimeoutEnv)
+	}
+	tc.persistOperatorEnvSnapshot(t, envSnapshot)
+	tc.resetStaleDagVersionOverride(t, envSnapshot)
+
 	t.Log("Ensuring clean slate: setting all components to Removed")
 	tc.setAllRemoved(t)
-	tc.removeOperatorEnvVars(t, "RHAI_VERSION", "CI")
+	tc.setOperatorEnvVars(t, corev1.EnvVar{Name: dagRunlevelTimeoutEnv, Value: dagE2ERunlevelTimeout.String()})
 
 	t.Cleanup(func() {
 		t.Log("Cleanup: setting all components to Removed, deleting quota, and restoring operator env vars")
 		tc.setAllRemoved(t)
 		tc.deleteDAGQuota()
-		tc.removeOperatorEnvVars(t, "RHAI_VERSION", "CI")
+		tc.restoreOperatorEnvVars(t, envSnapshot)
 	})
 
-	// Tests are ordered to minimise expensive enable/disable cycles.
-	// Each test's end state feeds the next test's start state.
-	//
-	// Phase 1: Gate tests (no upgrade simulation needed)
-	//   InTreeGates (→Removed) → AdminAckGates (→Removed)
-	//
-	// Phase 2: Deploy + gating with version handshake
-	//   PartialEnablement (→Removed) →
-	//   RunlevelGating (enables, converges, then upgrade + quota proves
-	//     gating and batch-sequential ordering, converges at new version
-	//     → AllReady)
-	//
-	// Phase 3: Steady-state tests (original version restored)
-	//   PlatformReady (→AllReady, read-only) →
-	//   ComponentStability (→AllReady, toggles KServe) →
-	//   DAGCleanup (→Removed)
+	// Gate tests leave every module Removed. The main scenario then enables all
+	// registered modules together, proves initial DAG gating, validates each
+	// module contract, and finally removes everything through DAG cleanup.
 
 	// Phase 1: gate tests
 	RunTestCases(t, []TestCase{
@@ -353,123 +175,65 @@ func (tc *DAGOrderingTestCtx) runOpenShiftTestCases(t *testing.T) {
 		{"Validate admin ack gates block and unblock provisioning", tc.ValidateAdminAckGates},
 	})
 
-	// Phase 2: deploy + gating with version upgrade
+	// Phase 2: initial provisioning, DAG gating, and module contracts
 	RunTestCases(t, []TestCase{
-		{"Validate partial enablement", tc.ValidatePartialEnablement},
 		{"Validate runlevel gating and convergence", tc.ValidateRunlevelGatingAndConvergence},
+		{"Report module contract failures", tc.ReportModuleContractFailures},
 	})
 
-	// Restore operator to original version after Phase 2 upgrade.
-	// Components have platform release = 99.0.0. Restoring triggers
-	// another gating cycle (version mismatch) until components reconcile.
-	t.Log("Restoring operator to original version for Phase 3")
-	tc.removeOperatorEnvVars(t, "RHAI_VERSION", "CI")
-
-	t.Log("Waiting for DSC to fully reconcile at original version")
-	tc.EnsureResourceExists(
-		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
-		WithCondition(And(
-			jq.Match(`.status.observedGeneration == .metadata.generation`),
-			jq.Match(
-				`any(.status.conditions[]; .type == "%s" and .status == "%s")`,
-				status.ConditionTypeComponentsReady, metav1.ConditionTrue,
-			),
-			jq.Match(
-				`any(.status.conditions[]; .type == "%s" and .status == "%s")`,
-				status.ConditionTypeModulesReady, metav1.ConditionTrue,
-			),
-		)),
-		WithEventuallyTimeout(5*time.Minute),
-		WithEventuallyPollingInterval(15*time.Second),
-	)
-
-	// Phase 3: steady-state tests
+	// Phase 3: cleanup
 	RunTestCases(t, []TestCase{
-		{"Validate PlatformReady condition on component CRs", tc.ValidatePlatformReady},
-		{"Validate component stability across enable/disable cycles (RHOAIENG-73142)", tc.ValidateComponentStability},
 		{"Validate DAG cleanup", tc.ValidateDAGCleanup},
 	})
 }
 
-// ValidateXKSRunlevelGating exercises DAG runlevel gating on xKS
-// clusters, which have no DataScienceCluster. It enables the Kserve
-// module (runlevel 31) through the Platform CR and asserts Kserve
-// reaches Ready=True, proving the DAG walk that clears runlevels runs
-// against the Platform CR on this platform.
-func (tc *DAGOrderingTestCtx) ValidateXKSRunlevelGating(t *testing.T) {
-	t.Helper()
-
-	t.Cleanup(func() {
-		tc.DeleteResource(
-			WithMinimalObject(gvk.Kserve, types.NamespacedName{Name: tc.GetInstanceName(gvk.Kserve)}),
-			WithForegroundDeletion(),
-			WithIgnoreNotFound(true),
-			WithWaitForDeletion(true),
-		)
-		tc.SetModuleStateInPlatformCR(t, "kserve", operatorv1.Removed)
-	})
-
-	t.Log("Enabling Kserve module via Platform CR")
-	tc.SetModuleStateInPlatformCR(t, "kserve", operatorv1.Managed)
-
-	t.Log("Creating Kserve CR for the module operator to reconcile")
-	tc.EventuallyResourceCreatedOrUpdated(
-		WithObjectToCreate(tc.CreateComponent(gvk.Kserve)),
-	)
-
-	t.Log("Waiting for Kserve module CR to reach Ready=True")
-	tc.EnsureResourceExists(
-		WithMinimalObject(gvk.Kserve, types.NamespacedName{Name: tc.GetInstanceName(gvk.Kserve)}),
-		WithCondition(jq.Match(`any(.status.conditions[]; .type == "Ready" and .status == "True")`)),
-		WithEventuallyTimeout(tc.TestTimeouts.longEventuallyTimeout),
-		WithEventuallyPollingInterval(15*time.Second),
-		WithCustomErrorMsg("Kserve should reach Ready=True on xKS after the Platform controller processes runlevel 31"),
-	)
-
-	t.Log("Verifying Platform CR ProvisioningProgress=True")
-	tc.EnsureResourceExists(
-		WithMinimalObject(gvk.Platform, tc.PlatformNamespacedName),
-		WithCondition(jq.Match(
-			`any(.status.conditions[]; .type == "%s" and .status == "%s")`,
-			status.ConditionTypeProvisioningProgress, metav1.ConditionTrue,
-		)),
-		WithEventuallyTimeout(2*time.Minute),
-		WithEventuallyPollingInterval(tc.TestTimeouts.defaultEventuallyPollInterval),
-	)
-}
-
-// ValidateRunlevelGatingAndConvergence proves that the DAG readiness
-// gating mechanism works end-to-end. It first deploys all components at
-// the original version, then simulates a version upgrade under a
-// zero-pod quota. The version change makes the readiness checker detect
-// a platform release mismatch on component CRs (old version != new
-// operator version), blocking DAG advancement. The quota prevents
-// batch-20 components from reconciling at the new version, keeping them
-// stuck. Extension controllers (batch 31+) should be gated
-// (PlatformReady=False) while batch 20 is blocked. Removing the quota
-// lets components reconcile, proving convergence.
-//
-// The test leaves the operator at version 99.0.0-dag-test for
-// subsequent tests (BatchOrdering). The suite restores the original
-// version after Phase 2.
+// ValidateRunlevelGatingAndConvergence validates the initial deployment and
+// proves upgrade ordering by blocking runlevel 20 from acknowledging a new
+// platform version and observing a later Deployment. Module contract findings
+// are reported by a separate stage after this test completes.
 func (tc *DAGOrderingTestCtx) ValidateRunlevelGatingAndConvergence(t *testing.T) {
 	t.Helper()
 
-	// Guard against leftover quota from a prior crashed/interrupted run.
-	tc.deleteDAGQuota()
+	batches, err := productionModuleBatches()
+	require.NoError(t, err, "resolve production module DAG")
+	require.Greater(t, len(batches), 1, "module DAG should contain multiple runlevels")
 
-	// Step 1: Deploy all components at the original version.
-	// This establishes platform release version in component CR status.
-	t.Log("Enabling all components and monitoring for initial deployment and waiting for initial convergence (ComponentsReady=True and ModulesReady=True on DSC)")
+	tc.deleteDAGQuota()
+	t.Log("Enabling all registered DSC modules and DSCI Monitoring")
 	tc.setDSCIMonitoringState(t, operatorv1.Managed)
 	tc.EventuallyResourcePatched(
 		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
-		WithMutateFunc(testf.Mutate[*dscApi.DataScienceCluster](tc.Scheme(), allComponentsManagedMutation)),
+		WithMutateFunc(allComponentsManagedTransform()),
+	)
+	t.Log("Waiting for DataScienceCluster Ready before checking module contracts")
+	tc.EnsureResourceExists(
+		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
 		WithCondition(And(
 			jq.Match(`.status.observedGeneration == .metadata.generation`),
 			jq.Match(
+				`any(.status.conditions[]; .type == "%s" and .status == "%s" and .observedGeneration == .metadata.generation)`,
+				status.ConditionTypeReady,
+				metav1.ConditionTrue,
+			),
+			jq.Match(
+				`any(.status.conditions[]; .type == "%s" and .status == "%s" and .observedGeneration == .metadata.generation)`,
+				status.ConditionTypeModulesReady,
+				metav1.ConditionTrue,
+			),
+		)),
+		WithEventuallyTimeout(15*time.Minute),
+		WithEventuallyPollingInterval(15*time.Second),
+		WithCustomErrorMsg("DataScienceCluster should be Ready with all modules ready before module contract checks"),
+	)
+	t.Log("DataScienceCluster is Ready with all modules ready; checking module contract entries")
+	tc.ValidateRegisteredModuleContracts(t)
+
+	tc.EnsureResourceExists(
+		WithMinimalObject(gvk.Platform, tc.PlatformNamespacedName),
+		WithCondition(And(
+			jq.Match(
 				`any(.status.conditions[]; .type == "%s" and .status == "%s")`,
-				status.ConditionTypeComponentsReady, metav1.ConditionTrue,
+				status.ConditionTypeProvisioningProgress, metav1.ConditionTrue,
 			),
 			jq.Match(
 				`any(.status.conditions[]; .type == "%s" and .status == "%s")`,
@@ -479,250 +243,263 @@ func (tc *DAGOrderingTestCtx) ValidateRunlevelGatingAndConvergence(t *testing.T)
 		WithEventuallyTimeout(15*time.Minute),
 		WithEventuallyPollingInterval(15*time.Second),
 	)
-	tc.waitForMonitoringReady(t)
 
-	// Step 2: Apply quota and simulate version upgrade.
-	// Quota blocks new pod creation. Version change triggers readiness
-	// gating: component CRs have the old platform release version which
-	// no longer matches the new operator version.
-	t.Log("Applying zero-pod quota to block deployments")
+	laterRegistration := batches[1][0].ModuleRegistration
+	laterDeployment := types.NamespacedName{
+		Namespace: tc.AppsNamespace,
+		Name:      moduleDeploymentName(laterRegistration.Handler),
+	}
+
 	tc.createDAGQuota()
-
-	t.Log("Simulating version upgrade")
+	t.Cleanup(tc.deleteDAGQuota)
+	tc.deleteModuleOperatorPods(t, batches[0])
+	t.Logf("Ensuring the current platform version differs from %s before triggering the DAG upgrade", dagTestVersion)
+	tc.EnsureResourceExists(
+		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
+		WithCondition(jq.Match(
+			`.status.release.version != null and .status.release.version != "" and .status.release.version != "%s"`,
+			dagTestVersion,
+		)),
+		WithEventuallyTimeout(5*time.Minute),
+		WithEventuallyPollingInterval(5*time.Second),
+		WithCustomErrorMsg("DSC should report a baseline version before the DAG upgrade test"),
+	)
 	tc.setOperatorEnvVars(t,
 		corev1.EnvVar{Name: "CI", Value: "true"},
 		corev1.EnvVar{Name: "RHAI_VERSION", Value: dagTestVersion},
 	)
 
-	// Step 3: Verify gating is active.
-	t.Log("Waiting for ProvisioningProgress=False on Platform CR (version mismatch + quota)")
 	tc.EnsureResourceExists(
 		WithMinimalObject(gvk.Platform, tc.PlatformNamespacedName),
 		WithCondition(jq.Match(
-			`any(.status.conditions[]; .type == "%s" and .status == "%s")`,
-			status.ConditionTypeProvisioningProgress, metav1.ConditionFalse,
+			`any(.status.conditions[]; .type == "%s" and .status == "%s" and .reason == "%s")`,
+			status.ConditionTypeProvisioningProgress,
+			metav1.ConditionFalse,
+			status.AwaitingReadinessReason,
 		)),
-		WithEventuallyTimeout(5*time.Minute),
-		WithEventuallyPollingInterval(10*time.Second),
+		WithEventuallyTimeout(3*time.Minute),
+		WithEventuallyPollingInterval(5*time.Second),
+		WithCustomErrorMsg("Platform should block later upgrade runlevels while runlevel 20 reports the old version"),
 	)
 
-	t.Log("Verifying Extension controllers are gated (PlatformReady=False) while prior batches are stuck")
-	for _, extGVK := range extensionGVKs {
-		instanceName := tc.GetInstanceName(extGVK)
-		tc.EnsureResourceExists(
-			WithMinimalObject(extGVK, types.NamespacedName{Name: instanceName}),
-			WithCondition(jq.Match(
-				`any(.status.conditions[]; .type == "%s" and .status == "%s")`,
-				precondition.PlatformReadyConditionType, metav1.ConditionFalse,
-			)),
-			WithCustomErrorMsg("Extension %s should have PlatformReady=False while prior batches are gated", extGVK.Kind),
-		)
-	}
-	t.Log("Confirmed: Extension controllers are gated")
+	tc.DeleteResource(
+		WithMinimalObject(gvk.Deployment, laterDeployment),
+		WithWaitForDeletion(true),
+	)
+	tc.g.Consistently(func() bool {
+		deployment := &unstructured.Unstructured{}
+		deployment.SetGroupVersionKind(gvk.Deployment)
+		err := tc.Client().Get(tc.Context(), laterDeployment, deployment)
+		return k8serr.IsNotFound(err)
+	}).WithTimeout(30*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
+		"later-runlevel module operator %s should remain gated", laterRegistration.Handler.GetName())
 
-	// Step 4: Remove quota and verify convergence at new version.
-	t.Log("Removing quota to unblock deployments")
+	t.Log("Removing quota so runlevel 20 can acknowledge the new platform version")
 	tc.deleteDAGQuota()
+	tc.waitForBatchUpgradeBeforeDeployment(t, batches[0], laterDeployment)
 
-	t.Log("Waiting for DAG convergence (ProvisioningProgress=True on Platform CR)")
+	tc.EnsureResourceExists(
+		WithMinimalObject(gvk.Deployment, laterDeployment),
+		WithCondition(jq.Match(`any(.status.conditions[]; .type == "Available" and .status == "True")`)),
+		WithEventuallyTimeout(15*time.Minute),
+		WithEventuallyPollingInterval(15*time.Second),
+	)
 	tc.EnsureResourceExists(
 		WithMinimalObject(gvk.Platform, tc.PlatformNamespacedName),
-		WithCondition(jq.Match(
-			`any(.status.conditions[]; .type == "%s" and .status == "%s")`,
-			status.ConditionTypeProvisioningProgress, metav1.ConditionTrue,
+		WithCondition(And(
+			jq.Match(
+				`any(.status.conditions[]; .type == "%s" and .status == "%s")`,
+				status.ConditionTypeProvisioningProgress, metav1.ConditionTrue,
+			),
+			jq.Match(
+				`any(.status.conditions[]; .type == "%s" and .status == "%s")`,
+				status.ConditionTypeModulesReady, metav1.ConditionTrue,
+			),
 		)),
 		WithEventuallyTimeout(15*time.Minute),
 		WithEventuallyPollingInterval(15*time.Second),
 	)
-
-	t.Log("Verifying component controllers are unblocked (PlatformReady=True)")
-	for _, batch := range dagBatches {
-		for _, comp := range batch.components {
-			if comp.internal {
-				continue
-			}
-			t.Logf("Waiting for %s to have PlatformReady=True", comp.name)
-			tc.EnsureResourceExists(
-				WithMinimalObject(comp.gvk, types.NamespacedName{Name: tc.GetInstanceName(comp.gvk)}),
-				WithCondition(jq.Match(
-					`any(.status.conditions[]; .type == "%s" and .status == "%s")`,
-					precondition.PlatformReadyConditionType, metav1.ConditionTrue,
-				)),
-				WithEventuallyTimeout(5*time.Minute),
-				WithEventuallyPollingInterval(10*time.Second),
-				WithCustomErrorMsg("%s should have PlatformReady=True after convergence", comp.name),
-			)
-		}
-	}
-
-	t.Log("Verifying ModulesReady=True on Platform CR")
-	tc.EnsureResourceExists(
-		WithMinimalObject(gvk.Platform, tc.PlatformNamespacedName),
-		WithCondition(jq.Match(
-			`any(.status.conditions[]; .type == "%s" and .status == "%s")`,
-			status.ConditionTypeModulesReady, metav1.ConditionTrue,
-		)),
-		WithEventuallyTimeout(2*time.Minute),
-		WithEventuallyPollingInterval(10*time.Second),
-	)
-
-	t.Log("Verifying module CRs are Ready")
-	for _, batch := range dagBatches {
-		for _, comp := range batch.components {
-			if !comp.internal {
-				continue
-			}
-			instanceName := tc.findFirstCRName(t, comp.gvk)
-			if instanceName == "" {
-				if comp.dsciConfigured {
-					t.Fatalf("expected %s CR after enabling via DSCI, found none", comp.gvk.Kind)
-				}
-				t.Logf("No %s CRs found, skipping readiness check", comp.gvk.Kind)
-				continue
-			}
-			t.Logf("Waiting for %s to have Ready=True", comp.name)
-			tc.EnsureResourceExists(
-				WithMinimalObject(comp.gvk, types.NamespacedName{Name: instanceName}),
-				WithCondition(jq.Match(
-					`any(.status.conditions[]; .type == "Ready" and .status == "True")`,
-				)),
-				WithEventuallyTimeout(2*time.Minute),
-				WithEventuallyPollingInterval(10*time.Second),
-				WithCustomErrorMsg("module %s should have Ready=True after convergence", comp.name),
-			)
-		}
-	}
-	t.Log("DAG gating and version handshake verified")
 }
 
-// ValidatePlatformReady verifies that every component CR has the
-// PlatformReady condition set to True after DAG convergence, confirming
-// that the in-memory runlevel tracker allowed each component's
-// precondition to pass.
-func (tc *DAGOrderingTestCtx) ValidatePlatformReady(t *testing.T) {
+func (tc *DAGOrderingTestCtx) waitForBatchUpgradeBeforeDeployment(
+	t *testing.T,
+	batch []moduleRegistrationNode,
+	gatedDeployment types.NamespacedName,
+) {
 	t.Helper()
 
-	for _, batch := range dagBatches {
-		for _, comp := range batch.components {
-			if comp.internal {
-				t.Logf("Skipping internal component %s (CR may not exist)", comp.name)
-				continue
+	deadline := time.Now().Add(dagE2ERunlevelTimeout - 30*time.Second)
+	for time.Now().Before(deadline) {
+		acknowledged := true
+		for _, node := range batch {
+			moduleStatus, err := node.Handler.GetModuleStatus(tc.Context(), tc.Client())
+			if err != nil || moduleStatus.ReleaseVersion != dagTestVersion {
+				acknowledged = false
+				break
 			}
+		}
+		if acknowledged {
+			return
+		}
 
-			instanceName := tc.findFirstCRName(t, comp.gvk)
-			if instanceName == "" {
-				t.Logf("No %s CRs found, skipping PlatformReady check", comp.gvk.Kind)
-				continue
-			}
+		deployment := &unstructured.Unstructured{}
+		deployment.SetGroupVersionKind(gvk.Deployment)
+		err := tc.Client().Get(tc.Context(), gatedDeployment, deployment)
+		if !k8serr.IsNotFound(err) {
+			require.NoError(t, err, "get gated module operator Deployment")
+			t.Fatalf("later-runlevel Deployment %s was recreated before runlevel 20 acknowledged platform version %s",
+				gatedDeployment.Name, dagTestVersion)
+		}
+		time.Sleep(5 * time.Second)
+	}
 
-			tc.EnsureResourceExists(
-				WithMinimalObject(comp.gvk, types.NamespacedName{Name: instanceName}),
-				WithCondition(jq.Match(
-					`any(.status.conditions[]; .type == "%s" and .status == "%s")`,
-					precondition.PlatformReadyConditionType, metav1.ConditionTrue,
-				)),
-				WithCustomErrorMsg("Component %s should have %s=True condition", comp.name, precondition.PlatformReadyConditionType),
+	t.Fatalf("runlevel 20 did not acknowledge platform version %s before the %s DAG timeout",
+		dagTestVersion, dagE2ERunlevelTimeout)
+}
+
+func (tc *DAGOrderingTestCtx) deleteModuleOperatorPods(t *testing.T, batch []moduleRegistrationNode) {
+	t.Helper()
+
+	for _, node := range batch {
+		deployment := tc.FetchResource(
+			WithMinimalObject(gvk.Deployment, types.NamespacedName{
+				Namespace: tc.AppsNamespace,
+				Name:      moduleDeploymentName(node.Handler),
+			}),
+		)
+		if deployment == nil {
+			continue
+		}
+		selector, _, err := unstructured.NestedStringMap(deployment.Object, "spec", "selector", "matchLabels")
+		require.NoError(t, err, "read selector for module %s", node.Handler.GetName())
+		if len(selector) == 0 {
+			continue
+		}
+		pods := tc.FetchResources(
+			WithMinimalObject(gvk.Pod, types.NamespacedName{Namespace: deployment.GetNamespace()}),
+			WithListOptions(&client.ListOptions{
+				Namespace:     deployment.GetNamespace(),
+				LabelSelector: labels.SelectorFromSet(selector),
+			}),
+		)
+		for i := range pods {
+			tc.DeleteResource(
+				WithMinimalObject(gvk.Pod, types.NamespacedName{
+					Namespace: pods[i].GetNamespace(),
+					Name:      pods[i].GetName(),
+				}),
+				WithWaitForDeletion(true),
 			)
-			t.Logf("Component %s: %s=True (correct)", comp.name, precondition.PlatformReadyConditionType)
 		}
 	}
 }
 
-// ValidateComponentStability verifies that toggling one component's
-// ManagementState does not cause unrelated higher-RL components to be
-// recreated (RHOAIENG-73142). Starting from AllReady state, it records
-// SparkOperator CR UID, sets KServe to Removed then back to Managed,
-// and asserts SparkOperator CR UID is unchanged.
-func (tc *DAGOrderingTestCtx) ValidateComponentStability(t *testing.T) {
+func (tc *DAGOrderingTestCtx) moduleOperatorDeploymentNames() (map[string]struct{}, error) {
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(gvk.Deployment.GroupVersion().WithKind("DeploymentList"))
+	if err := tc.Client().List(tc.Context(), list); err != nil {
+		return nil, err
+	}
+
+	names := make(map[string]struct{}, len(list.Items))
+	for i := range list.Items {
+		names[list.Items[i].GetName()] = struct{}{}
+	}
+	return names, nil
+}
+
+type operatorPrerequisite struct {
+	namespacedName types.NamespacedName
+	channel        string
+	global         bool
+}
+
+func (tc *DAGOrderingTestCtx) ensureOperatorPrerequisites(t *testing.T) {
 	t.Helper()
 
-	t.Log("Ensuring KServe and SparkOperator are Managed")
-	tc.EventuallyResourcePatched(
-		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
-		WithMutateFunc(testf.Mutate[*dscApi.DataScienceCluster](tc.Scheme(), func(dsc *dscApi.DataScienceCluster) error {
-			componentEntryByName(componentApi.KserveComponentName).Enable(dsc)
-			componentEntryByName(componentApi.SparkOperatorComponentName).Enable(dsc)
-			return nil
-		})),
-	)
+	prerequisites := []operatorPrerequisite{
+		{
+			namespacedName: types.NamespacedName{Name: certManagerOpName, Namespace: certManagerOpNamespace},
+			channel:        certManagerOpChannel,
+			global:         true,
+		},
+		{
+			namespacedName: types.NamespacedName{Name: jobSetOpName, Namespace: jobSetOpNamespace},
+			channel:        jobSetOpChannel,
+		},
+		{
+			namespacedName: types.NamespacedName{Name: kuadrantOpName, Namespace: kuadrantNamespace},
+			channel:        defaultOperatorChannel,
+			global:         true,
+		},
+	}
 
-	sparkInstanceName := tc.GetInstanceName(gvk.SparkOperator)
-
-	t.Log("Waiting for SparkOperator CR to exist and be Ready")
-	tc.EnsureResourceExists(
-		WithMinimalObject(gvk.SparkOperator, types.NamespacedName{Name: sparkInstanceName}),
-		WithCondition(jq.Match(
-			`any(.status.conditions[]; .type == "Ready" and .status == "True")`,
-		)),
-		WithEventuallyTimeout(10*time.Minute),
-		WithEventuallyPollingInterval(15*time.Second),
+	tc.ensureOperatorsInstalled(t, prerequisites)
+	tc.EnsureCRDEstablished("issuers.cert-manager.io")
+	tc.EnsureCRDEstablished("certificates.cert-manager.io")
+	tc.EventuallyResourceCreatedOrUpdated(
+		WithObjectToCreate(CreateJobSetOperator()),
+		WithCondition(jq.Match(`.status.conditions[] | select(.type == "Available") | .status == "True"`)),
+		WithCustomErrorMsg("JobSetOperator cluster resource should become Available"),
 	)
+}
 
-	t.Log("Recording SparkOperator CR UID before toggle")
-	sparkBefore := tc.FetchResource(
-		WithMinimalObject(gvk.SparkOperator, types.NamespacedName{Name: sparkInstanceName}),
-	)
-	require.NotNil(t, sparkBefore, "SparkOperator CR should exist in AllReady state")
-	uidBefore := sparkBefore.GetUID()
-	require.NotEmpty(t, uidBefore, "SparkOperator CR should have a UID")
+func (tc *DAGOrderingTestCtx) ensureOperatorsInstalled(t *testing.T, prerequisites []operatorPrerequisite) {
+	t.Helper()
 
-	t.Log("Setting KServe to Removed")
-	tc.EventuallyResourcePatched(
-		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
-		WithMutateFunc(testf.Mutate[*dscApi.DataScienceCluster](tc.Scheme(), func(dsc *dscApi.DataScienceCluster) error {
-			componentEntryByName(componentApi.KserveComponentName).Disable(dsc)
-			return nil
-		})),
-	)
+	for _, prerequisite := range prerequisites {
+		t.Logf("Ensuring prerequisite operator %s is installed in namespace %s",
+			prerequisite.namespacedName.Name, prerequisite.namespacedName.Namespace)
+		if prerequisite.global {
+			tc.EnsureOperatorInstalledWithGlobalOperatorGroupAndChannel(
+				prerequisite.namespacedName,
+				prerequisite.channel,
+			)
+			continue
+		}
+		tc.EnsureOperatorInstalledWithLocalOperatorGroupAndChannel(
+			prerequisite.namespacedName,
+			prerequisite.channel,
+		)
+	}
+}
 
-	t.Log("Waiting for KServe CR to be deleted")
-	tc.EnsureResourceGone(
-		WithMinimalObject(gvk.Kserve, types.NamespacedName{Name: tc.GetInstanceName(gvk.Kserve)}),
-		WithEventuallyTimeout(5*time.Minute),
-		WithEventuallyPollingInterval(10*time.Second),
-	)
+func (tc *DAGOrderingTestCtx) ValidateRegisteredModuleContracts(t *testing.T) {
+	t.Helper()
 
-	t.Log("Waiting for DSC to reflect KServe removal")
-	tc.EnsureResourceExists(
-		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
-		WithCondition(jq.Match(
-			`any(.status.conditions[]; .type == "KserveReady" and .status == "False" and .reason == "Removed")`,
-		)),
-		WithEventuallyTimeout(2*time.Minute),
-		WithEventuallyPollingInterval(10*time.Second),
-	)
+	if tc.IsXKS() {
+		t.Log("Skipping the OpenShift module contract on xKS")
+		return
+	}
 
-	t.Log("Setting KServe back to Managed")
-	tc.EventuallyResourcePatched(
-		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
-		WithMutateFunc(testf.Mutate[*dscApi.DataScienceCluster](tc.Scheme(), func(dsc *dscApi.DataScienceCluster) error {
-			componentEntryByName(componentApi.KserveComponentName).Enable(dsc)
-			return nil
-		})),
-		WithCondition(jq.Match(
-			`.status.components.kserve.managementState == "%s"`,
-			string(operatorv1.Managed),
-		)),
-	)
+	batches, err := productionModuleBatches()
+	if err != nil {
+		t.Errorf("resolve production module DAG: %v", err)
+		return
+	}
 
-	t.Log("Waiting for KServe CR to be recreated and Ready")
-	tc.EnsureResourceExists(
-		WithMinimalObject(gvk.Kserve, types.NamespacedName{Name: tc.GetInstanceName(gvk.Kserve)}),
-		WithCondition(jq.Match(
-			`any(.status.conditions[]; .type == "Ready" and .status == "True")`,
-		)),
-		WithEventuallyTimeout(10*time.Minute),
-		WithEventuallyPollingInterval(15*time.Second),
-	)
+	for _, batch := range batches {
+		if len(batch) == 0 {
+			continue
+		}
+		runlevel := batch[0].Runlevel
+		t.Run(fmt.Sprintf("Runlevel %s module contracts", runlevel), func(t *testing.T) {
+			for _, node := range batch {
+				registration := node.ModuleRegistration
+				t.Run(registration.Handler.GetName(), func(t *testing.T) {
+					ctx := newModuleContractTestCtx(t, tc.TestContext, registration, tc.contractReport)
+					ctx.ValidateModuleContract(t)
+				})
+			}
+		})
+	}
+}
 
-	t.Log("Verifying SparkOperator CR UID is unchanged")
-	sparkAfter := tc.FetchResource(
-		WithMinimalObject(gvk.SparkOperator, types.NamespacedName{Name: sparkInstanceName}),
-	)
-	require.NotNil(t, sparkAfter, "SparkOperator CR should still exist")
-	require.Equal(t, uidBefore, sparkAfter.GetUID(),
-		"SparkOperator CR was recreated (UID changed) — RHOAIENG-73142 regression")
-	t.Log("SparkOperator CR UID stable across KServe toggle")
+// ReportModuleContractFailures emits the aggregate module contract findings in
+// a dedicated stage so they are not attributed to the last module subtest.
+func (tc *DAGOrderingTestCtx) ReportModuleContractFailures(t *testing.T) {
+	t.Helper()
+	tc.contractReport.log(t)
 }
 
 // ValidateDAGCleanup sets all components to Removed, waits for the DSC
@@ -742,68 +519,6 @@ func (tc *DAGOrderingTestCtx) ValidateDAGCleanup(t *testing.T) {
 
 	t.Log("Verifying all component CRs are cleaned up (no orphans)")
 	tc.ensureAllRemovedComponentsGone(t)
-}
-
-// ValidatePartialEnablement enables a subset of components spanning
-// multiple batches and verifies that disabled components don't block
-// the DAG. It also guards against RHOAIENG-93536, where quickly toggling a
-// module's managementState Removed -> Managed -> Removed left its CR orphaned.
-func (tc *DAGOrderingTestCtx) ValidatePartialEnablement(t *testing.T) {
-	t.Helper()
-
-	// Prior test (AdminAckGates) leaves all components Removed.
-
-	t.Log("Enabling partial set: dashboard (batch 20), kserve (batch 31), AI Hub (batch 20)")
-	tc.EventuallyResourcePatched(
-		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
-		WithMutateFunc(testf.Mutate[*dscApi.DataScienceCluster](tc.Scheme(), func(dsc *dscApi.DataScienceCluster) error {
-			componentEntryByName(componentApi.DashboardComponentName).Enable(dsc)
-			componentEntryByName(componentApi.KserveComponentName).Enable(dsc)
-			componentEntryByName(componentApi.AIHubModuleName).Enable(dsc)
-			return nil
-		})),
-	)
-
-	// Regression check (RHOAIENG-93536): flipping a module's managementState
-	// Managed -> Removed again before it settles used to leave its CR (and
-	// operator resources) orphaned forever.
-	t.Log("Immediately disabling AI Hub again (fast Removed->Managed->Removed toggle)")
-	tc.EventuallyResourcePatched(
-		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
-		WithMutateFunc(testf.Mutate[*dscApi.DataScienceCluster](tc.Scheme(), func(dsc *dscApi.DataScienceCluster) error {
-			componentEntryByName(componentApi.AIHubModuleName).Disable(dsc)
-			return nil
-		})),
-	)
-
-	t.Log("Verifying enabled component CRs are created")
-	enabledGVKs := []schema.GroupVersionKind{gvk.Dashboard, gvk.Kserve}
-	for _, g := range enabledGVKs {
-		instanceName := tc.GetInstanceName(g)
-		tc.EnsureResourceExists(
-			WithMinimalObject(g, types.NamespacedName{Name: instanceName}),
-			WithEventuallyTimeout(5*time.Minute),
-			WithEventuallyPollingInterval(10*time.Second),
-			WithCustomErrorMsg("Enabled component CR %s should exist", g.Kind),
-		)
-	}
-
-	t.Log("Verifying disabled component CRs are not created")
-	disabledGVKs := []schema.GroupVersionKind{
-		gvk.Ray, gvk.FeastOperator, gvk.SparkOperator, gvk.TrustyAI, gvk.AIHub,
-	}
-	for _, g := range disabledGVKs {
-		instanceName := tc.GetInstanceName(g)
-		tc.EnsureResourceGone(
-			WithMinimalObject(g, types.NamespacedName{Name: instanceName}),
-			WithEventuallyTimeout(3*time.Minute),
-			WithEventuallyPollingInterval(10*time.Second),
-			WithCustomErrorMsg("Disabled component CR %s should not exist", g.Kind),
-		)
-	}
-
-	t.Log("Cleaning up: setting all components to Removed")
-	tc.setAllRemoved(t)
 }
 
 // ValidateInTreeGates verifies that gate entries compiled into the
@@ -837,11 +552,7 @@ func (tc *DAGOrderingTestCtx) ValidateInTreeGates(t *testing.T) {
 	t.Log("Enabling dashboard and aigateway to trigger a reconcile (in-tree gates should be discovered)")
 	tc.EventuallyResourcePatched(
 		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
-		WithMutateFunc(testf.Mutate[*dscApi.DataScienceCluster](tc.Scheme(), func(dsc *dscApi.DataScienceCluster) error {
-			componentEntryByName(componentApi.DashboardComponentName).Enable(dsc)
-			componentEntryByName(componentApi.AIGatewayComponentName).Enable(dsc)
-			return nil
-		})),
+		WithMutateFunc(selectComponentsTransform("Managed", []string{"dashboard", "aigateway"})),
 	)
 
 	t.Log("Waiting for ProvisioningProgress=False with reason AdminAckRequired")
@@ -937,11 +648,7 @@ func (tc *DAGOrderingTestCtx) ValidateAdminAckGates(t *testing.T) {
 	t.Log("Enabling dashboard and aigateway to trigger a reconcile")
 	tc.EventuallyResourcePatched(
 		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
-		WithMutateFunc(testf.Mutate[*dscApi.DataScienceCluster](tc.Scheme(), func(dsc *dscApi.DataScienceCluster) error {
-			componentEntryByName(componentApi.DashboardComponentName).Enable(dsc)
-			componentEntryByName(componentApi.AIGatewayComponentName).Enable(dsc)
-			return nil
-		})),
+		WithMutateFunc(selectComponentsTransform("Managed", []string{"dashboard", "aigateway"})),
 	)
 
 	t.Log("Waiting for ProvisioningProgress=False with reason AdminAckRequired on Platform CR")
@@ -1043,42 +750,42 @@ func (tc *DAGOrderingTestCtx) deleteGateSourceCMs(t *testing.T, names ...string)
 
 // --- helpers ---
 
-func allComponentsManagedMutation(dsc *dscApi.DataScienceCluster) error {
-	for _, batch := range dagBatches {
-		for _, component := range batch.components {
-			switch {
-			case component.Enable == nil:
-				continue
-			case slices.Contains(dscComponentsExcludedFromManagedDAGTests, component.name):
-				continue
-			default:
-				component.Enable(dsc)
-			}
-		}
-	}
-	return nil
+func allComponentsManagedTransform() func(*unstructured.Unstructured) error {
+	return selectComponentsTransform("Managed", managedDAGTestDSCComponentFields())
 }
 
-func allComponentsRemovedMutation(dsc *dscApi.DataScienceCluster) error {
-	for _, batch := range dagBatches {
-		for _, component := range batch.components {
-			if component.Disable != nil {
-				component.Disable(dsc)
-			}
-		}
-	}
-	return nil
+func allComponentsRemovedTransform() func(*unstructured.Unstructured) error {
+	return selectComponentsTransform("Removed", allDAGTestDSCComponentFields())
 }
 
-func componentEntryByName(name string) componentEntry {
-	for _, batch := range dagBatches {
-		for _, component := range batch.components {
-			if component.name == name {
-				return component
+func selectComponentsTransform(state string, fields []string) func(*unstructured.Unstructured) error {
+	return func(obj *unstructured.Unstructured) error {
+		for _, field := range fields {
+			componentPath := []string{"spec", "components", field}
+			switch field {
+			case "dashboard":
+				componentPath = append(componentPath, "standard")
+			case "data":
+				// The v3 Data component owns both legacy Data Registry and
+				// Feature Store configuration. Set both so cleanup cannot
+				// leave one of the subcomponents enabled.
+				for _, subcomponent := range []string{"featureStore", "dataRegistry"} {
+					if err := unstructured.SetNestedField(
+						obj.Object, state, append(componentPath, subcomponent, "managementState")...,
+					); err != nil {
+						return err
+					}
+				}
+				continue
+			}
+			if err := unstructured.SetNestedField(
+				obj.Object, state, append(componentPath, "managementState")...,
+			); err != nil {
+				return err
 			}
 		}
+		return nil
 	}
-	panic(fmt.Sprintf("component %q not found in DAG test entries", name))
 }
 
 // setDSCIMonitoringState patches the DSCI to set monitoring management state.
@@ -1092,35 +799,6 @@ func (tc *DAGOrderingTestCtx) setDSCIMonitoringState(t *testing.T, state operato
 	)
 }
 
-// waitForMonitoringReady waits for the Monitoring CR after DSCI enablement.
-// DSC ModulesReady does not include ConfigFromDSCI modules, so the shared
-// DSC wait is not enough before the upgrade starts. After convergence the
-// generic internal-module loop covers Ready=True.
-func (tc *DAGOrderingTestCtx) waitForMonitoringReady(t *testing.T) {
-	t.Helper()
-
-	t.Log("Waiting for Monitoring CR Ready=True")
-	tc.EnsureResourceExists(
-		WithMinimalObject(gvk.Monitoring, types.NamespacedName{Name: serviceApi.MonitoringInstanceName}),
-		WithCondition(jq.Match(`any(.status.conditions[]; .type == "Ready" and .status == "True")`)),
-		WithEventuallyTimeout(15*time.Minute),
-		WithEventuallyPollingInterval(15*time.Second),
-		WithCustomErrorMsg("Monitoring CR %s should exist and have Ready=True", serviceApi.MonitoringInstanceName),
-	)
-
-	t.Log("Waiting for DSCI MonitoringReady=True")
-	tc.EnsureResourceExists(
-		WithMinimalObject(gvk.DSCInitialization, tc.DSCInitializationNamespacedName),
-		WithCondition(jq.Match(
-			`any(.status.conditions[]; .type == "%s" and .status == "%s")`,
-			status.ConditionMonitoringReady, metav1.ConditionTrue,
-		)),
-		WithEventuallyTimeout(5*time.Minute),
-		WithEventuallyPollingInterval(10*time.Second),
-		WithCustomErrorMsg("DSCI should have MonitoringReady=True when monitoring is Managed"),
-	)
-}
-
 // setAllRemoved is a reusable helper that sets all components to Removed,
 // waits for Ready=True, and verifies all component CRs are deleted.
 func (tc *DAGOrderingTestCtx) setAllRemoved(t *testing.T) {
@@ -1130,7 +808,7 @@ func (tc *DAGOrderingTestCtx) setAllRemoved(t *testing.T) {
 
 	tc.EventuallyResourcePatched(
 		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
-		WithMutateFunc(testf.Mutate[*dscApi.DataScienceCluster](tc.Scheme(), allComponentsRemovedMutation)),
+		WithMutateFunc(allComponentsRemovedTransform()),
 	)
 
 	tc.EnsureResourceExists(
@@ -1144,31 +822,36 @@ func (tc *DAGOrderingTestCtx) setAllRemoved(t *testing.T) {
 	)
 
 	tc.ensureAllRemovedComponentsGone(t)
+	tc.ensureAllRemovedOperatorDeploymentsGone(t)
 }
 
-// ensureAllRemovedComponentsGone verifies that every componentEntry actually
-// driven to Removed has its CR deleted. Monitoring is removed via the DSCI
-// (setDSCIMonitoringState), not the DSC spec.components fields below, so it
-// is checked explicitly. Kueue is set to Removed during cleanup even though
-// its validation webhook prevents enabling it in the all-managed scenario.
+// ensureAllRemovedComponentsGone verifies that every production module CR is
+// gone after its DSC/DSCI source is set to Removed. Kueue is intentionally not
+// included because it remains an in-tree component rather than a module.
 func (tc *DAGOrderingTestCtx) ensureAllRemovedComponentsGone(t *testing.T) {
 	t.Helper()
 
-	for _, batch := range dagBatches {
-		for _, comp := range batch.components {
-			removed := comp.dsciConfigured || comp.Disable != nil
-			if !removed {
-				t.Logf("Skipping gone-check for %s: not meant to be Removed", comp.name)
-				continue
-			}
+	for _, registration := range modulebuiltin.Registrations() {
+		t.Logf("Waiting for all %s module CRs to be removed", registration.Handler.GetName())
+		tc.EnsureResourcesGone(
+			WithMinimalObject(registration.Handler.GetGVK(), types.NamespacedName{}),
+			WithEventuallyTimeout(5*time.Minute),
+			WithEventuallyPollingInterval(10*time.Second),
+		)
+	}
+}
 
-			instanceName := tc.GetInstanceName(comp.gvk)
-			tc.EnsureResourceGone(
-				WithMinimalObject(comp.gvk, types.NamespacedName{Name: instanceName}),
-				WithEventuallyTimeout(5*time.Minute),
-				WithEventuallyPollingInterval(10*time.Second),
-			)
-		}
+func (tc *DAGOrderingTestCtx) ensureAllRemovedOperatorDeploymentsGone(t *testing.T) {
+	t.Helper()
+
+	for _, registration := range modulebuiltin.Registrations() {
+		name := moduleDeploymentName(registration.Handler)
+		tc.g.Eventually(func(g Gomega) {
+			deployed, err := tc.moduleOperatorDeploymentNames()
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(deployed).NotTo(HaveKey(name))
+		}).WithTimeout(5*time.Minute).WithPolling(10*time.Second).Should(Succeed(),
+			"module operator Deployment %s should be removed", name)
 	}
 }
 
@@ -1235,6 +918,102 @@ func (tc *DAGOrderingTestCtx) deleteDAGQuota() {
 // setOperatorEnvVars sets environment variables on the operator, triggering
 // a single pod restart. For OLM installs it patches the CSV (OLM propagates to
 // the Deployment). For non-OLM installs it patches the Deployment directly.
+func (tc *DAGOrderingTestCtx) persistOperatorEnvSnapshot(t *testing.T, snapshot operatorEnvSnapshot) {
+	t.Helper()
+
+	data := make(map[string]string, len(snapshot))
+	for name, value := range snapshot {
+		encoded, err := json.Marshal(value)
+		require.NoError(t, err, "encode operator environment snapshot %s", name)
+		data[name] = string(encoded)
+	}
+
+	key := types.NamespacedName{
+		Namespace: tc.OperatorNamespace,
+		Name:      dagOperatorEnvSnapshotConfigMap,
+	}
+	configMap := &corev1.ConfigMap{}
+	err := tc.Client().Get(tc.Context(), key, configMap)
+	switch {
+	case k8serr.IsNotFound(err):
+		configMap = &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: tc.OperatorNamespace,
+				Name:      dagOperatorEnvSnapshotConfigMap,
+				Labels: map[string]string{
+					"opendatahub.io/created-by-e2e-tests": "true",
+				},
+			},
+			Data: data,
+		}
+		require.NoError(t, tc.Client().Create(tc.Context(), configMap), "persist operator environment snapshot")
+	case err != nil:
+		require.NoError(t, err, "read operator environment snapshot")
+	default:
+		configMap.Data = data
+		require.NoError(t, tc.Client().Update(tc.Context(), configMap), "update operator environment snapshot")
+	}
+	t.Logf("Persisted operator environment snapshot in %s/%s", tc.OperatorNamespace, dagOperatorEnvSnapshotConfigMap)
+}
+
+func (tc *DAGOrderingTestCtx) restorePersistedOperatorEnvSnapshot(t *testing.T) operatorEnvSnapshot {
+	t.Helper()
+
+	configMap := &corev1.ConfigMap{}
+	err := tc.Client().Get(tc.Context(), types.NamespacedName{
+		Namespace: tc.OperatorNamespace,
+		Name:      dagOperatorEnvSnapshotConfigMap,
+	}, configMap)
+	if k8serr.IsNotFound(err) {
+		return nil
+	}
+	require.NoError(t, err, "read persisted operator environment snapshot")
+
+	snapshot := make(operatorEnvSnapshot, len(configMap.Data))
+	for name, encoded := range configMap.Data {
+		var value *corev1.EnvVar
+		require.NoError(t, json.Unmarshal([]byte(encoded), &value), "decode operator environment snapshot %s", name)
+		snapshot[name] = value
+	}
+	t.Logf("Restoring persisted operator environment snapshot from %s/%s", tc.OperatorNamespace, dagOperatorEnvSnapshotConfigMap)
+	tc.restoreOperatorEnvVars(t, snapshot)
+	return snapshot
+}
+
+func (tc *DAGOrderingTestCtx) deleteOperatorEnvSnapshot(t *testing.T) {
+	t.Helper()
+
+	err := tc.Client().Delete(tc.Context(), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+		Namespace: tc.OperatorNamespace,
+		Name:      dagOperatorEnvSnapshotConfigMap,
+	}})
+	if err != nil && !k8serr.IsNotFound(err) {
+		t.Errorf("failed to delete operator environment snapshot: %v", err)
+		return
+	}
+	t.Logf("Deleted operator environment snapshot %s/%s", tc.OperatorNamespace, dagOperatorEnvSnapshotConfigMap)
+}
+
+func (tc *DAGOrderingTestCtx) resetStaleDagVersionOverride(t *testing.T, snapshot operatorEnvSnapshot) {
+	t.Helper()
+
+	version := snapshot["RHAI_VERSION"]
+	if version == nil || version.Value != dagTestVersion {
+		return
+	}
+
+	t.Logf("Resetting stale RHAI_VERSION=%q before DAG cleanup; retaining snapshot for restoration", version.Value)
+	if tc.findSubscription(t) != nil {
+		if !tc.patchSubscriptionEnvVarRemovals(t, []string{"RHAI_VERSION"}) {
+			t.Log("Subscription disappeared while resetting stale RHAI_VERSION; falling back to Deployment patch")
+			tc.patchDeploymentEnvVars(t, nil, []string{"RHAI_VERSION"})
+		}
+	} else {
+		tc.patchDeploymentEnvVars(t, nil, []string{"RHAI_VERSION"})
+	}
+	tc.waitForOperatorReady(t)
+}
+
 func (tc *DAGOrderingTestCtx) setOperatorEnvVars(t *testing.T, envs ...corev1.EnvVar) {
 	t.Helper()
 
@@ -1248,19 +1027,60 @@ func (tc *DAGOrderingTestCtx) setOperatorEnvVars(t *testing.T, envs ...corev1.En
 	tc.waitForOperatorReady(t)
 }
 
-// removeOperatorEnvVars removes environment variables from the operator
-// and waits for the pod to restart.
-func (tc *DAGOrderingTestCtx) removeOperatorEnvVars(t *testing.T, envNames ...string) {
+type operatorEnvSnapshot map[string]*corev1.EnvVar
+
+func (tc *DAGOrderingTestCtx) snapshotOperatorEnvVars(t *testing.T, names ...string) operatorEnvSnapshot {
 	t.Helper()
 
-	if tc.patchSubscriptionEnvVarRemovals(t, envNames) {
-		t.Logf("Patched Subscription to remove env vars: %v", envNames)
+	var envs []corev1.EnvVar
+	if sub := tc.findSubscription(t); sub != nil {
+		if sub.Spec.Config != nil {
+			envs = sub.Spec.Config.Env
+		}
 	} else {
-		t.Logf("No OLM Subscription found, patching Deployment directly")
-		tc.patchDeploymentEnvVars(t, nil, envNames)
+		deployment := &appsv1.Deployment{}
+		err := tc.Client().Get(tc.Context(), tc.operatorDeploymentNN(), deployment)
+		require.NoError(t, err, "get operator Deployment")
+		require.NotEmpty(t, deployment.Spec.Template.Spec.Containers, "operator Deployment has no containers")
+		envs = deployment.Spec.Template.Spec.Containers[0].Env
 	}
 
+	snapshot := make(operatorEnvSnapshot, len(names))
+	for _, name := range names {
+		for i := range envs {
+			if envs[i].Name == name {
+				value := envs[i]
+				snapshot[name] = &value
+				break
+			}
+		}
+	}
+	return snapshot
+}
+
+func (tc *DAGOrderingTestCtx) restoreOperatorEnvVars(t *testing.T, snapshot operatorEnvSnapshot) {
+	t.Helper()
+
+	toSet := make([]corev1.EnvVar, 0, len(snapshot))
+	toRemove := make([]string, 0, len(snapshot))
+	for name, value := range snapshot {
+		if value == nil {
+			toRemove = append(toRemove, name)
+			continue
+		}
+		toSet = append(toSet, *value)
+	}
+
+	if tc.findSubscription(t) != nil {
+		tc.patchSubscriptionEnvVarRemovals(t, toRemove)
+		tc.patchSubscriptionEnvVars(t, toSet)
+		t.Logf("Restored Subscription env vars: %v", envVarNames(toSet))
+	} else {
+		tc.patchDeploymentEnvVars(t, toSet, toRemove)
+		t.Logf("Restored Deployment env vars: %v", envVarNames(toSet))
+	}
 	tc.waitForOperatorReady(t)
+	tc.deleteOperatorEnvSnapshot(t)
 }
 
 // patchSubscriptionEnvVars patches the operator Subscription to set env vars
@@ -1315,29 +1135,6 @@ func (tc *DAGOrderingTestCtx) patchSubscriptionEnvVarRemovals(t *testing.T, envN
 	require.NoError(t, err, "Failed to update Subscription %s", sub.Name)
 
 	return true
-}
-
-// findFirstCRName lists CRs of the given GVK and returns the name of the first one.
-// Returns empty string if none exist.
-func (tc *DAGOrderingTestCtx) findFirstCRName(t *testing.T, gvk schema.GroupVersionKind) string {
-	t.Helper()
-
-	list := &unstructured.UnstructuredList{}
-	list.SetGroupVersionKind(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
-
-	if err := tc.Client().List(tc.Context(), list); err != nil {
-		if meta.IsNoMatchError(err) {
-			t.Logf("CRD for %s not found, skipping", gvk.Kind)
-			return ""
-		}
-		require.NoError(t, err, "failed to list %s CRs", gvk.Kind)
-	}
-
-	if len(list.Items) == 0 {
-		return ""
-	}
-
-	return list.Items[0].GetName()
 }
 
 // findSubscription returns the operator Subscription, or nil if not found.

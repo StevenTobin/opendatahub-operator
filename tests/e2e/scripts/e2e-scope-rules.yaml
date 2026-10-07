@@ -123,12 +123,10 @@ components:
   aipipelines:
     aliases:
       - datasciencepipelines
-  kueue: {}
-
+  kueue:
+    covered: false
   aihub: {}
-  # No deps populated yet: aihub depends on "modelcontroller", which
-  # isn't a registered component/module name on main yet. Add the edge once
-  # it lands — don't substitute a guess.
+  databaseservice: {}
 
   ray: {}
   sparkoperator: {}
@@ -145,40 +143,19 @@ components:
   mlflowoperator: {}
 
   kserve:
-    # kserve-modelcache: the ModelCache scenario runs in its own parallel
-    # group under this name (tests/e2e/controller_test.go's Components
-    # TestGroup), since it mutates namespace PSA labels and can't run
-    # alongside other KServe tests. Test selection matches scenario keys
-    # exactly, so selecting "kserve" alone would skip this scenario
-    # forever without this dependency.
-    deps: [trustyai, kserve-modelcache]
-    aliases: [kserve-module-operator, kserve_aihub]
-
-  # A real, selectable e2e name, but not a separately-registered
-  # component -- see kserve.deps above for why it exists. It needs its own
-  # entry so it counts as a known name, even though it's only ever reached
-  # through kserve's dependency, never directly.
-  kserve-modelcache: {}
+    aliases: [kserve-module-operator]
 
   ogx: {}
 
-  workbenches:
-    deps: [kueue, mlflowoperator]
-
+  workbenches: {}
   data:
-    aliases: [data_module]
-
-  databaseservice: {}
+    aliases: [data_module, feastoperator]
+  monitoring:
+    aliases: [odh-observability]
 
 services:
   auth: {}
   gateway: {}
-  monitoring:
-    # The handler lives in internal/controller/modules/monitoring/, but
-    # monitoring is still a service (DSCI spec, Services TestGroup). The
-    # Helm chart and manifests-config.yaml componentCharts key are
-    # odh-observability; the registered name is "monitoring".
-    aliases: [odh-observability]
 
   certconfigmapgenerator:
     covered: false
