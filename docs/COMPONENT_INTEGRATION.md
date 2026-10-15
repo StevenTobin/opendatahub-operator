@@ -371,20 +371,20 @@ focused scenarios only to an existing lifecycle, webhook, or service suite
 when that suite owns the behavior.
 
 The preferred module path has automatic contract coverage: once a handler is
-added to `builtin.Registrations()`, the OpenShift DAG ordering suite discovers
+added to `builtin.Registrations()`, the OpenShift platform orchestration suite discovers
 it, orders it by its production runlevel, and runs its module contract as an
 isolated child test. The contract covers source ownership, module CR status and
 platform release, operator Deployment availability, required
 `APPLICATIONS_NAMESPACE`/`RELATED_IMAGE_*` injection, and DSC or DSCI status
-propagation. It is controlled by `E2E_TEST_DAG_ORDERING` /
-`--test-dag-ordering`; xKS coverage is deferred and `make e2e-test-xks`
+propagation. It is controlled by `E2E_TEST_PLATFORM_ORCHESTRATION` /
+`--test-platform-orchestration`; xKS coverage is deferred and `make e2e-test-xks`
 disables the contract.
 
 Add a `components.<name>` entry to
 `tests/e2e/scripts/e2e-scope-rules.yaml` for registry completeness and path
 ownership. Mark a legacy in-tree component `covered: false` when it has no
 remaining E2E contract. Scope resolution can narrow Auth/Gateway service tests,
-but it does not filter the registered-module DAG contract. See
+but it does not filter the registered-module platform orchestration contract. See
 [the E2E guide](e2e-testing.md#path-based-test-scoping).
 
 ### 4. Update Prometheus config and tests

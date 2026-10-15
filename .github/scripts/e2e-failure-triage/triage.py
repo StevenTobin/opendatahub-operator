@@ -42,7 +42,7 @@ JOB_AS_NAME_PATTERN = re.compile(
 )
 
 MODULE_CONTRACT_TEST_PATTERN = re.compile(
-    r"^TestOdhOperator/DAG_Ordering_E2E_Tests/"
+    r"^TestOdhOperator/Platform_Orchestration_E2E_Tests/"
     r"Validate_runlevel_gating_and_convergence/"
     r"Runlevel_[^/]+_module_contracts/([^/]+)(?:/|$)"
 )
@@ -264,7 +264,7 @@ def extract_component(test_name: str) -> str | None:
     """Extract the module name from a DAG contract test path.
 
     Returns the module name for paths like:
-        TestOdhOperator/DAG_Ordering_E2E_Tests/
+        TestOdhOperator/Platform_Orchestration_E2E_Tests/
         Validate_runlevel_gating_and_convergence/
         Runlevel_20_module_contracts/dashboard
     Returns None for service, parent, cleanup, or other platform-level tests.

@@ -803,7 +803,7 @@ endif
 e2e: e2e-test ## Alias for e2e-test
 # Path-based e2e test scoping (cmd/manifest-tools' resolve-e2e-scope subcommand)
 # runs and logs its decision whenever E2E_TEST_SERVICE is unset. Only when
-# E2E_AUTO_RESOLVE=true does it narrow service tests; the DAG/module contract
+# E2E_AUTO_RESOLVE=true does it narrow service tests; the platform orchestration/module contract
 # remains unfiltered. Otherwise it only logs.
 export E2E_AUTO_RESOLVE
 E2E_AUTO_RESOLVE ?= false
@@ -856,7 +856,7 @@ e2e-test:
 e2e-test-single:
 # Run a single E2E test function (usage: make e2e-test-single TEST="<test-path>")
 ifndef TEST
-	$(error TEST is required. Usage: make e2e-test-single TEST="TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence")
+	$(error TEST is required. Usage: make e2e-test-single TEST="TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence")
 endif
 	@echo "Running single test: $(TEST)"
 	E2E_TEST_DELETION_POLICY=never E2E_TEST_CLEAN_UP_PREVIOUS_RESOURCES=false go test ./tests/e2e/ -run "$(TEST)" -timeout=10m -v
@@ -867,7 +867,7 @@ e2e-setup-cluster:
 # (operator-controller tests may still execute unless explicitly disabled)
 	@echo "Creating DSCI and DSC with all services enabled..."
 	@$(MAKE) e2e-test \
-		-e E2E_TEST_DAG_ORDERING=false \
+		-e E2E_TEST_PLATFORM_ORCHESTRATION=false \
 		-e E2E_TEST_SERVICES=false \
 		-e E2E_TEST_WEBHOOK=false \
 		-e E2E_TEST_OPERATOR_RESILIENCE=false \
@@ -880,7 +880,7 @@ e2e-test-xks: ## Run e2e tests on external Kubernetes (KinD, AKS, CoreWeave, etc
 		-e E2E_TEST_CLEAN_UP_PREVIOUS_RESOURCES=false \
 		-e E2E_TEST_DEPENDANT_OPERATORS_MANAGEMENT=false \
 		-e E2E_TEST_WEBHOOK=false \
-		-e E2E_TEST_DAG_ORDERING=false \
+		-e E2E_TEST_PLATFORM_ORCHESTRATION=false \
 		-e E2E_TEST_SERVICES=true \
 		-e E2E_TEST_SERVICE="gateway" \
 		-e E2E_TEST_OPERATOR_RESILIENCE=false \

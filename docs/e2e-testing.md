@@ -42,16 +42,16 @@ The E2E test suite is organized into test groups that run sequentially:
 
 - **`make e2e-test-xks`** — Gateway-focused tests on KinD / vanilla Kubernetes.
   This is the CI-equivalent E2E for KinD (see `.github/workflows/test-kind-odh-e2e.yaml`).
-  The target explicitly sets `E2E_TEST_DAG_ORDERING=false`; the xKS module contract is
+  The target explicitly sets `E2E_TEST_PLATFORM_ORCHESTRATION=false`; the xKS module contract is
   deferred and is not implied by this target.
 
 - **`make e2e-test`** — Full OpenShift suite across DSC/DSCI lifecycle, the DAG
   ordering and module contract, Auth/Gateway services, webhooks, and operator resilience.
 
 Legacy per-component suites and files no longer exist. Registered modules are discovered from
-production registrations, ordered by the production DAG, and checked individually as child tests
-within `DAG Ordering E2E Tests`. The complete contract is controlled by
-`E2E_TEST_DAG_ORDERING` or `--test-dag-ordering`; there is no per-module selection flag.
+production registrations, ordered by the production orchestration DAG, and checked individually as child tests
+within `Platform Orchestration E2E Tests`. The complete contract is controlled by
+`E2E_TEST_PLATFORM_ORCHESTRATION` or `--test-platform-orchestration`; there is no per-module selection flag.
 
 For each registered module, the contract verifies:
 
@@ -62,6 +62,19 @@ For each registered module, the contract verifies:
 - an available module-operator Deployment with `APPLICATIONS_NAMESPACE` and every
   handler-declared `RELATED_IMAGE_*` that is configured on the platform operator injected with the same value; and
 - readiness propagation to DSC status, or DSCI readiness and `MonitoringReady=True` for Monitoring. Platform release is validated on the authoritative module CR rather than DSC status.
+
+### Conversion webhook tests
+
+The OpenShift suite also preserves dedicated CRD conversion coverage. These tests exercise
+v2↔v3 conversion for the DSC and Platform APIs, including KServe/WVA compatibility, rather
+than module lifecycle behavior. They are controlled independently from the platform orchestration contract:
+
+- `E2E_TEST_CONVERSION_WEBHOOK` / `--test-conversion-webhook`
+- `E2E_TEST_CONVERSION_WEBHOOK_DSC` / `--test-conversion-webhook-dsc`
+- `E2E_TEST_CONVERSION_WEBHOOK_PLATFORM` / `--test-conversion-webhook-platform`
+
+The conversion scenarios run after the functional suites because they temporarily use the
+singleton DSC. They are skipped on xKS clusters.
 
 The operator's default DAG runlevel timeout is 10 minutes and is configurable with
 `ODH_DAG_RUNLEVEL_TIMEOUT` or `--dag-runlevel-timeout`. The OpenShift DAG E2E temporarily
@@ -114,7 +127,7 @@ a simulated platform-version upgrade.
    ```
 
 10. **Run E2E tests**: `make e2e-test-xks`
-    - The target runs Gateway service coverage and disables the DAG/module contract because the xKS contract is deferred
+    - The target runs Gateway service coverage and disables the platform orchestration/module contract because the xKS contract is deferred
     - Tests bootstrap `Platform`, Dex, and `GatewayConfig` (with OIDC) automatically — see [Dex OIDC provider](#dex-oidc-provider-kind-xks-gateway) below
     - Production xKS installs create `GatewayConfig` via the `xks-gateway` Helm subchart in odh-gitops instead
 
@@ -155,11 +168,11 @@ make e2e-test-xks E2E_TEST_SERVICE=gateway
 
 ## OpenShift DAG Contract on KinD
 
-The OpenShift DAG/module contract is not currently supported on KinD or other xKS
+The OpenShift platform orchestration/module contract is not currently supported on KinD or other xKS
 clusters. The previous manual command for a broader per-component KinD suite depended on
 legacy component test files that have been removed. Use `make e2e-test` on OpenShift for
 registered-module contract coverage; `make e2e-test-xks` intentionally disables it with
-`E2E_TEST_DAG_ORDERING=false`.
+`E2E_TEST_PLATFORM_ORCHESTRATION=false`.
 
 ## Full E2E on OpenShift
 
@@ -178,27 +191,28 @@ registered-module contract coverage; `make e2e-test-xks` intentionally disables 
 4. **Run full E2E tests**: `make e2e-test`
 
 5. **Run a single module contract path** (useful for debugging):
-   `make e2e-test-single TEST="TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"`
+   `make e2e-test-single TEST="TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"`
 
 ### Running a registered module contract path
 
-There is no `E2E_TEST_COMPONENT` or platform-orchestration filter. The normal DAG suite
-checks every registered module. For focused debugging, select a module child path while
-retaining the parent DAG setup, for example:
+There is no per-module selector. The platform orchestration suite checks every registered
+module. For focused debugging, select a module child path while retaining the parent setup,
+or select the dedicated upgrade-ordering scenario:
 
 ```bash
 go test -v ./tests/e2e/ \
-  -run "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve" \
+  -run "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve" \
   -timeout=60m
 ```
 
 Other examples include `Runlevel_20_module_contracts/monitoring` for the DSCI-backed
-Monitoring module and `Runlevel_32_module_contracts/sparkoperator`. The parent test still
-enables the production registration set and resolves real DAG ordering.
+Monitoring module, `Runlevel_32_module_contracts/sparkoperator`, and
+`DAG_Ordering_Upgrade_E2E_Tests` for the version/runlevel upgrade scenario. The parent test
+still enables the production registration set and resolves the real orchestration DAG.
 
 ### Setting up cluster prerequisites only
 
-To create DSCI and DSC resources without running the DAG/module contract (useful for manual testing):
+To create DSCI and DSC resources without running the platform orchestration/module contract (useful for manual testing):
 `make e2e-setup-cluster`
 
 ### Namespace defaults
@@ -291,10 +305,10 @@ done
 | `make kind-setup-pull-secrets` | Configure pull secrets for `registry.redhat.io` |
 | `make deploy-ccm-local-azure` | Deploy Cloud Manager with local image pull policy |
 | `make deploy-rhaii-local` | Deploy operator in XKS mode (KServe module + gateway service enabled) |
-| `make e2e-test-xks` | Run KinD/xKS Gateway E2E tests with the DAG/module contract disabled |
+| `make e2e-test-xks` | Run KinD/xKS Gateway E2E tests with the platform orchestration/module contract disabled |
 | `make e2e-test` | Run full E2E tests (requires OpenShift) |
 | `make e2e-test-single TEST="<path>"` | Run a single E2E test |
-| `make e2e-setup-cluster` | Create DSCI/DSC without running the DAG/module contract |
+| `make e2e-setup-cluster` | Create DSCI/DSC without running the platform orchestration/module contract |
 | `make deploy` | Deploy operator via kustomize (OpenShift) |
 
 ### Environment variables
@@ -307,17 +321,17 @@ Defaults and descriptions live in `tests/e2e/controller_test.go` (`TestMain`). K
 
 | Variable | CLI flag | Default | Description |
 |----------|----------|---------|-------------|
-| `E2E_TEST_DAG_ORDERING` | `--test-dag-ordering` | `true` | Run OpenShift DAG ordering and every registered-module contract |
+| `E2E_TEST_PLATFORM_ORCHESTRATION` | `--test-platform-orchestration` | `true` | Run OpenShift Platform orchestration and every registered-module contract |
 | `E2E_TEST_SERVICES` | `--test-services` | `true` | Run the Services `TestGroup` |
 | `E2E_TEST_SERVICE` | `--test-service` | `auth,gateway` | Select Auth and/or Gateway service tests |
 | `E2E_TEST_DELETION_POLICY` | `--deletion-policy` | `always` | Delete test resources `never`, `always`, or `on-failure` |
-| `E2E_AUTO_RESOLVE` | *(Makefile only)* | `false` | Apply path-based scope to service tests only; the DAG/module contract remains unfiltered |
+| `E2E_AUTO_RESOLVE` | *(Makefile only)* | `false` | Apply path-based scope to service tests only; the platform orchestration/module contract remains unfiltered |
 
 The historical V2-to-V3 upgrade suite and its E2E flag have been removed.
 
 ### Path-based test scoping
 
-`make e2e-test` runs `cmd/manifest-tools resolve-e2e-scope`, which classifies changed files against `tests/e2e/scripts/e2e-scope-rules.yaml`. Component/module classifications remain useful for ownership and completeness checks, but they no longer filter E2E module coverage: when `E2E_TEST_DAG_ORDERING=true`, all production module registrations run through the DAG contract.
+`make e2e-test` runs `cmd/manifest-tools resolve-e2e-scope`, which classifies changed files against `tests/e2e/scripts/e2e-scope-rules.yaml`. Component/module classifications remain useful for ownership and completeness checks, but they no longer filter E2E module coverage: when `E2E_TEST_PLATFORM_ORCHESTRATION=true`, all production module registrations run through the platform orchestration contract.
 
 The resolver always logs its decision with the `SELECTIVE-E2E:` prefix. When `E2E_AUTO_RESOLVE=true`, the Makefile applies only the resolved **service** scope through `E2E_TEST_SERVICE`, or disables the Services group when no service is affected. Ambiguous classifications fall back to the safe full scope.
 

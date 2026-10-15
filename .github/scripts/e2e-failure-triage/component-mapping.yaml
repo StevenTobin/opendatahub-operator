@@ -1,7 +1,7 @@
 # Mapping from registered module names to Jira component field values.
 #
 # The keys match module names in DAG contract JUnit paths:
-#   TestOdhOperator/DAG_Ordering_E2E_Tests/
+#   TestOdhOperator/Platform_Orchestration_E2E_Tests/
 #   Validate_runlevel_gating_and_convergence/
 #   Runlevel_<N>_module_contracts/<key>/...
 #

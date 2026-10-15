@@ -22,7 +22,7 @@ DSC / DSCI Reconcile
 
 Platform Reconcile
   -> cleanupDisabledModules    (keep operators while CR finalizers run)
-  -> provisionModules          (resolve production DAG; collect operator manifests)
+  -> provisionModules          (resolve production orchestration DAG; collect operator manifests)
   -> Helm / Kustomize render
   -> inject module env and platform config
   -> deploy.NewAction          (SSA-apply operator resources)
@@ -98,11 +98,11 @@ is not a Services `TestGroup` entry.
 
 ### E2E module contract
 
-On OpenShift, `tests/e2e/dag_ordering_test.go` resolves the same built-in
-registrations through the production DAG and runs a child contract test for
+On OpenShift, `tests/e2e/platform_orchestration_test.go` resolves the same built-in
+registrations through the production orchestration DAG and runs a child contract test for
 each module. The suite is controlled as a whole by
-`E2E_TEST_DAG_ORDERING` / `--test-dag-ordering`; legacy per-component and
-platform-orchestration selectors have been removed.
+`E2E_TEST_PLATFORM_ORCHESTRATION` / `--test-platform-orchestration`; legacy per-component
+selectors have been removed.
 
 Each registered module must satisfy the following contract:
 
@@ -120,12 +120,12 @@ Each registered module must satisfy the following contract:
 Example focused paths (the parent DAG setup still runs):
 
 ```shell
-make e2e-test-single TEST="TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"
-make e2e-test-single TEST="TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/monitoring"
+make e2e-test-single TEST="TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"
+make e2e-test-single TEST="TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/monitoring"
 ```
 
 The contract is currently OpenShift-only. `make e2e-test-xks` sets
-`E2E_TEST_DAG_ORDERING=false`; the xKS module contract is deferred.
+`E2E_TEST_PLATFORM_ORCHESTRATION=false`; the xKS module contract is deferred.
 
 Runlevel gating uses a 10-minute default timeout. Operators can override it
 with `ODH_DAG_RUNLEVEL_TIMEOUT` or `--dag-runlevel-timeout`; the OpenShift E2E
@@ -270,7 +270,7 @@ For a DSCI-backed module, also set `ConfigSource: modules.ConfigFromDSCI`.
 Registration controls startup wiring, DAG ordering, cleanup ownership source,
 and automatic enrollment in the OpenShift E2E module contract. Add the module
 to `tests/e2e/scripts/e2e-scope-rules.yaml` so registry-completeness tests can
-validate path ownership; scope rules do not filter the DAG contract.
+validate path ownership; scope rules do not filter the platform orchestration contract.
 
 ## Package Reference
 

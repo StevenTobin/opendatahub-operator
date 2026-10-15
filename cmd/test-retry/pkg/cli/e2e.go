@@ -79,8 +79,9 @@ Example: test-retry e2e -- -run TestFoo -v`,
 	cmd.Flags().StringSliceVar(&skipAtPrefix, "skip-at-prefix", []string{
 		"TestOdhOperator/monitoring/", // Extract monitoring tests at group level for efficient retry
 		"TestOdhOperator/services/*/", // Extract services at service level
-		// Extract DAG contract tests at module level within each runlevel.
-		"TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/*/",
+		"TestOdhOperator/Platform_Orchestration_E2E_Tests/DAG_Ordering_Upgrade_E2E_Tests/", // Extract the upgrade-ordering scenario as one retryable test.
+		// Extract platform contract tests at module level within each runlevel.
+		"TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/*/",
 		"TestOdhOperator/", // Fallback: extract at root level
 	}, "Test prefixes where tests should be extracted at prefix + 1 level (repeatable)")
 	cmd.Flags().StringVar(&junitOutput, "junit-output", "", "Path to JUnit XML output file (optional)")

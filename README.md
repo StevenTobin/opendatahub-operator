@@ -922,10 +922,13 @@ Evn vars can be set to configure e2e tests:
 | E2E_TEST_OPERATOR_CONTROLLER             | Enable operator controller tests. | `true` |
 | E2E_TEST_OPERATOR_RESILIENCE             | Enable operator resilience tests. | `true` |
 | E2E_TEST_WEBHOOK                         | Enable operator webhook tests. | `true` |
-| E2E_TEST_DAG_ORDERING                    | Enable the OpenShift DAG ordering and registered-module contract suite. | `true` |
+| E2E_TEST_CONVERSION_WEBHOOK              | Enable CRD conversion webhook tests. | `true` |
+| E2E_TEST_CONVERSION_WEBHOOK_DSC          | Include DSC conversion scenarios. | `true` |
+| E2E_TEST_CONVERSION_WEBHOOK_PLATFORM     | Include Platform conversion scenarios. | `true` |
+| E2E_TEST_PLATFORM_ORCHESTRATION                    | Enable the OpenShift platform orchestration and registered-module contract suite. | `true` |
 | E2E_TEST_SERVICES                        | Enable service tests selected by `E2E_TEST_SERVICE`. | `true` |
 | E2E_TEST_SERVICE                         | Select service tests. Valid services are `auth` and `gateway`; both run by default. | `auth,gateway` |
-| E2E_AUTO_RESOLVE                         | When `true`, apply path-based selection to service tests. The DAG/module contract remains unfiltered and always covers every registered module when enabled. See [Path-based test scoping](docs/e2e-testing.md#path-based-test-scoping). | `false` |
+| E2E_AUTO_RESOLVE                         | When `true`, apply path-based selection to service tests. The platform orchestration/module contract remains unfiltered and always covers every registered module when enabled. See [Path-based test scoping](docs/e2e-testing.md#path-based-test-scoping). | `false` |
 | E2E_TEST_DELETION_POLICY                 | Specify when to delete `DataScienceCluster`, `DSCInitialization`, and controllers: `always`, `on-failure`, or `never`. | `always` |
 | E2E_TEST_CLEAN_UP_PREVIOUS_RESOURCES     | Clean resources left by an earlier E2E run before starting. | `true` |
 | E2E_TEST_BACKUP_AND_RESTORE_DSCI_AND_DSC | Back up DSCI/DSC at suite start and restore them at the end. | `false` |
@@ -948,7 +951,10 @@ Alternatively the above configurations can be passed to e2e-tests as flags by se
 | --test-operator-controller | Enable operator controller tests. | `true` |
 | --test-operator-resilience | Enable operator resilience tests. | `true` |
 | --test-webhook | Enable operator webhook tests. | `true` |
-| --test-dag-ordering | Enable the OpenShift DAG ordering and registered-module contract suite. | `true` |
+| --test-conversion-webhook | Enable CRD conversion webhook tests. | `true` |
+| --test-conversion-webhook-dsc | Include DSC conversion scenarios. | `true` |
+| --test-conversion-webhook-platform | Include Platform conversion scenarios. | `true` |
+| --test-platform-orchestration | Enable the OpenShift platform orchestration and registered-module contract suite. | `true` |
 | --test-services | Enable service tests selected by `--test-service`. | `true` |
 | --test-service | Select `auth` and/or `gateway`; repeat the flag or use a comma-separated value. | `auth,gateway` |
 | --deletion-policy | Delete test resources `always`, `on-failure`, or `never`. | `always` |
@@ -989,13 +995,13 @@ Example command to run full test suite skipping the DataScienceCluster deletion 
 make e2e-test -e E2E_TEST_OPERATOR_NAMESPACE=<namespace> -e E2E_TEST_DELETION_POLICY=never
 ```
 
-Registered modules are not selected through per-component flags. On OpenShift, enabling `E2E_TEST_DAG_ORDERING` runs every production registration in DAG order and executes each module contract as an isolated child test. Monitoring participates in this suite as a DSCI-backed module.
+Registered modules are not selected through per-component flags. On OpenShift, enabling `E2E_TEST_PLATFORM_ORCHESTRATION` runs every production registration in DAG order and executes each module contract as an isolated child test. Monitoring participates in this suite as a DSCI-backed module.
 
-To run only the remaining service group, select Auth or Gateway and disable the DAG contract:
+To run only the remaining service group, select Auth or Gateway and disable the platform orchestration contract:
 
 ```shell
 make e2e-test \
-  -e E2E_TEST_DAG_ORDERING=false \
+  -e E2E_TEST_PLATFORM_ORCHESTRATION=false \
   -e E2E_TEST_SERVICE=gateway
 ```
 
@@ -1008,7 +1014,7 @@ Before running any single E2E test, DSCI and DSC resources must exist. Use this 
 make e2e-setup-cluster
 ```
 
-This runs `e2e-test` with the DAG/module contract, webhook, service, and resilience groups disabled, deletion policy set to `never`, and cleanup enabled. After setup completes, individual DAG module paths or Auth/Gateway service tests can run against the prepared cluster.
+This runs `e2e-test` with the platform orchestration/module contract, webhook, service, and resilience groups disabled, deletion policy set to `never`, and cleanup enabled. After setup completes, individual DAG module paths or Auth/Gateway service tests can run against the prepared cluster.
 
 #### Running a Single E2E Test
 
@@ -1016,10 +1022,13 @@ Use `e2e-test-single` with a full Go subtest path. Registered module checks are 
 
 ```shell
 # Run the Dashboard module contract at runlevel 20
-make e2e-test-single TEST="TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"
+make e2e-test-single TEST="TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"
 
 # Run the Monitoring DSCI-backed module contract at runlevel 20
-make e2e-test-single TEST="TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/monitoring"
+make e2e-test-single TEST="TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/monitoring"
+
+# Run the dedicated upgrade ordering scenario
+make e2e-test-single TEST="TestOdhOperator/Platform_Orchestration_E2E_Tests/DAG_Ordering_Upgrade_E2E_Tests"
 
 # Run an Auth or Gateway service test
 make e2e-test-single TEST="TestOdhOperator/services/auth"
@@ -1028,7 +1037,7 @@ make e2e-test-single TEST="TestOdhOperator/services/auth"
 The same path can be passed directly to `go test` when a longer suite timeout is needed:
 
 ```shell
-go test -v -run "TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve" ./tests/e2e/ -timeout=60m
+go test -v -run "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve" ./tests/e2e/ -timeout=60m
 ```
 
 **Note:** Filtering to a module child path still runs the parent DAG setup and convergence flow. `e2e-test-single` does **not** create DSCI/DSC; prepare the cluster first with [Cluster Setup for E2E](#cluster-setup-for-e2e).
@@ -1053,8 +1062,8 @@ Quick reference: "I changed code in directory X — which E2E test(s) should I r
 | `internal/controller/modules/<module>/` | None | `make e2e-test` (all registered module contracts run in DAG order) |
 | `internal/controller/modules/monitoring/` or DSCI monitoring API | Run required code generation for API changes | `make e2e-test` (Monitoring is a DSCI-backed module) |
 | `internal/controller/modules/builtin/`, `pkg/controller/dag/`, or module registration/runlevel metadata | None | `make e2e-test` |
-| `internal/controller/services/auth/` | None | `make e2e-test -e E2E_TEST_DAG_ORDERING=false -e E2E_TEST_SERVICE=auth` |
-| `internal/controller/services/gateway/` | None | `make e2e-test -e E2E_TEST_DAG_ORDERING=false -e E2E_TEST_SERVICE=gateway` |
+| `internal/controller/services/auth/` | None | `make e2e-test -e E2E_TEST_PLATFORM_ORCHESTRATION=false -e E2E_TEST_SERVICE=auth` |
+| `internal/controller/services/gateway/` | None | `make e2e-test -e E2E_TEST_PLATFORM_ORCHESTRATION=false -e E2E_TEST_SERVICE=gateway` |
 | `api/datasciencecluster/`, `api/dscinitialization/` | `make generate manifests api-docs` | `make e2e-test` |
 | `internal/controller/datasciencecluster/`, `internal/controller/dscinitialization/`, `pkg/`, `config/`, or `cmd/main.go` | None | `make e2e-test` |
 | Module operator manifests under `opt/manifests/` or `opt/charts/` | None | `make e2e-test` |
@@ -1102,7 +1111,7 @@ make e2e-test  # include other args as needed
 <summary>How do I run only Auth or Gateway service tests?</summary>
 
 ```shell
-make e2e-test -e E2E_TEST_DAG_ORDERING=false -e E2E_TEST_SERVICES=true -e E2E_TEST_SERVICE="auth,gateway" -e E2E_TEST_DELETION_POLICY=never
+make e2e-test -e E2E_TEST_PLATFORM_ORCHESTRATION=false -e E2E_TEST_SERVICES=true -e E2E_TEST_SERVICE="auth,gateway" -e E2E_TEST_DELETION_POLICY=never
 ```
 
 Monitoring is covered by the DSCI-backed module contract, not the Services `TestGroup`.
@@ -1115,10 +1124,10 @@ Monitoring is covered by the DSCI-backed module contract, not the Services `Test
 Run its child path under the DAG convergence test. For example:
 
 ```shell
-make e2e-test-single TEST="TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/workbenches"
+make e2e-test-single TEST="TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/workbenches"
 ```
 
-There is no `E2E_TEST_COMPONENT` selector. To disable or enable the complete contract with `E2E_TEST_FLAGS`, use `--test-dag-ordering=false` or `--test-dag-ordering=true`.
+There is no `E2E_TEST_COMPONENT` selector. To disable or enable the complete contract with `E2E_TEST_FLAGS`, use `--test-platform-orchestration=false` or `--test-platform-orchestration=true`.
 
 </details>
 
@@ -1128,7 +1137,7 @@ There is no `E2E_TEST_COMPONENT` selector. To disable or enable the complete con
 Use the `e2e-test-single` target:
 
 ```shell
-make e2e-test-single TEST="TestOdhOperator/DAG_Ordering_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"
+make e2e-test-single TEST="TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"
 make e2e-test-single TEST="TestOdhOperator/services/gateway"
 ```
 

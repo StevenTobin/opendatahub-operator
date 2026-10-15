@@ -33,14 +33,17 @@ go build -o test-retry .
 # Enable verbose output
 ./test-retry e2e --verbose
 
-# Filter the DAG suite
-./test-retry e2e --filter "^TestOdhOperator$/^DAG_Ordering_E2E_Tests$"
+# Filter the platform orchestration suite
+./test-retry e2e --filter "^TestOdhOperator$/^Platform_Orchestration_E2E_Tests$"
+
+# Filter the dedicated upgrade-ordering scenario
+./test-retry e2e --filter "^TestOdhOperator$/^Platform_Orchestration_E2E_Tests$/^DAG_Ordering_Upgrade_E2E_Tests$"
 
 # Filter one module contract within a DAG runlevel
-./test-retry e2e --filter "^TestOdhOperator$/^DAG_Ordering_E2E_Tests$/^Validate_runlevel_gating_and_convergence$/^Runlevel_20_module_contracts$/^dashboard$"
+./test-retry e2e --filter "^TestOdhOperator$/^Platform_Orchestration_E2E_Tests$/^Validate_runlevel_gating_and_convergence$/^Runlevel_20_module_contracts$/^dashboard$"
 
 # Filter multiple top-level suites using a Go test regular expression
-./test-retry e2e --filter "^TestOdhOperator$/^(DAG_Ordering_E2E_Tests|services)$"
+./test-retry e2e --filter "^TestOdhOperator$/^(Platform_Orchestration_E2E_Tests|services)$"
 
 # Run with custom test runner options
 ./test-retry e2e -- "-count=3 -timeout=30m"
@@ -53,12 +56,13 @@ go build -o test-retry .
 
 #### E2E Test Flags
 - `--filter`: Filter tests using Go's `-run` regular-expression syntax (default: `"^TestOdhOperator"`)
-  - DAG suite: `"^TestOdhOperator$/^DAG_Ordering_E2E_Tests$"`
-  - DAG module contract: `"^TestOdhOperator$/^DAG_Ordering_E2E_Tests$/^Validate_runlevel_gating_and_convergence$/^Runlevel_20_module_contracts$/^dashboard$"`
+  - Platform orchestration suite: "^TestOdhOperator$/^Platform_Orchestration_E2E_Tests$"
+  - Upgrade ordering: "^TestOdhOperator$/^Platform_Orchestration_E2E_Tests$/^DAG_Ordering_Upgrade_E2E_Tests$"
+  - Module contract: `"^TestOdhOperator$/^Platform_Orchestration_E2E_Tests$/^Validate_runlevel_gating_and_convergence$/^Runlevel_20_module_contracts$/^dashboard$"`
 - `--path`: Path to e2e tests (default: "./tests/e2e/")
 - `--working-dir`: Working directory for running go test (default: current directory)
 - `--never-skip`: Test prefixes that should never be skipped (default: ["TestOdhOperator/DSCInitialization\_and\_DataScienceCluster\_management\_E2E\_Tests", "TestOdhOperator/DataScienceCluster"])
-- `--skip-at-prefix`: Test prefixes where tests should be extracted at prefix + 1 level (default: ["TestOdhOperator/monitoring/", "TestOdhOperator/services/*/", "TestOdhOperator/DAG\_Ordering\_E2E\_Tests/Validate\_runlevel\_gating\_and\_convergence/*/", "TestOdhOperator/"]). The wildcard matches each DAG runlevel group, so its immediate module subtests can be skipped after passing while other ordered DAG scenarios retain the generic fallback behavior.
+- `--skip-at-prefix`: Test prefixes where tests should be extracted at prefix + 1 level (default: ["TestOdhOperator/monitoring/", "TestOdhOperator/services/*/", "TestOdhOperator/Platform\_Orchestration\_E2E\_Tests/DAG\_Ordering\_Upgrade\_E2E\_Tests/", "TestOdhOperator/Platform\_Orchestration\_E2E\_Tests/Validate\_runlevel\_gating\_and\_convergence/*/", "TestOdhOperator/"]). The wildcard matches each platform-contract runlevel group, while the upgrade-ordering scenario is retried as one unit.
 - `--junit-output`: Path to JUnit XML output file (optional)
 - `--github-token`: GitHub token for authentication (can also use GITHUB_TOKEN env var)
 - `--github-owner`: GitHub repository owner

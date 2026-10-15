@@ -97,7 +97,7 @@ E2E tests in `tests/e2e/` exercise the full module lifecycle (provision, update,
 
 Additional E2E tests validate library-level behavior at the system level:
 
-- `tests/e2e/dag_ordering_test.go` -- DAG resolution and ordering
+- `tests/e2e/platform_orchestration_test.go` -- Platform orchestration and runlevel ordering
 - `tests/e2e/resilience_test.go` -- error recovery and retry
 - `tests/e2e/deletion_test.go` -- cleanup and GC chains
 - `tests/e2e/circuit_breaker_test.go` -- circuit breaker behavior

@@ -63,8 +63,8 @@ validate_bool E2E_TEST_OPERATOR_RESILIENCE
 : "${E2E_TEST_WEBHOOK:=true}"
 validate_bool E2E_TEST_WEBHOOK
 
-: "${E2E_TEST_DAG_ORDERING:=true}"
-validate_bool E2E_TEST_DAG_ORDERING
+: "${E2E_TEST_PLATFORM_ORCHESTRATION:=true}"
+validate_bool E2E_TEST_PLATFORM_ORCHESTRATION
 
 : "${E2E_TEST_SERVICES:=true}"
 validate_bool E2E_TEST_SERVICES
@@ -150,7 +150,7 @@ if [ "$USE_TEST_RETRY" = "true" ] || [ "$USE_TEST_RETRY" = "1" ]; then
     --test-dsc-management="$E2E_TEST_DSC_MANAGEMENT" \
     --test-operator-resilience="$E2E_TEST_OPERATOR_RESILIENCE" \
     --test-webhook="$E2E_TEST_WEBHOOK" \
-    --test-dag-ordering="$E2E_TEST_DAG_ORDERING" \
+    --test-platform-orchestration="$E2E_TEST_PLATFORM_ORCHESTRATION" \
     --test-services="$E2E_TEST_SERVICES" \
     --operator-namespace="$E2E_TEST_OPERATOR_NAMESPACE" \
     --applications-namespace="$E2E_TEST_APPLICATIONS_NAMESPACE" \
@@ -185,7 +185,7 @@ else
     --test-dsc-management="$E2E_TEST_DSC_MANAGEMENT" \
     --test-operator-resilience="$E2E_TEST_OPERATOR_RESILIENCE" \
     --test-webhook="$E2E_TEST_WEBHOOK" \
-    --test-dag-ordering="$E2E_TEST_DAG_ORDERING" \
+    --test-platform-orchestration="$E2E_TEST_PLATFORM_ORCHESTRATION" \
     --test-services="$E2E_TEST_SERVICES" \
     --operator-namespace="$E2E_TEST_OPERATOR_NAMESPACE" \
     --applications-namespace="$E2E_TEST_APPLICATIONS_NAMESPACE" \

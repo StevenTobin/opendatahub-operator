@@ -94,7 +94,10 @@ type TestContextConfig struct {
 	operatorControllerTest     bool
 	operatorResilienceTest     bool
 	webhookTest                bool
-	dagOrderingTest            bool
+	conversionWebhookTest      bool
+	conversionWebhookDSC       bool
+	conversionWebhookPlatform  bool
+	platformOrchestrationTest  bool
 	circuitBreakerEnabled      bool
 	circuitBreakerThreshold    int
 	TestTimeouts               TestTimeouts
@@ -433,8 +436,8 @@ func TestOdhOperator(t *testing.T) {
 	}
 
 	// Run the unified DAG ordering and module contract suite on a clean DSC.
-	if testOpts.dagOrderingTest {
-		mustRun(t, "DAG Ordering E2E Tests", dagOrderingTestSuite)
+	if testOpts.platformOrchestrationTest {
+		mustRun(t, "Platform Orchestration E2E Tests", platformOrchestrationTestSuite)
 	}
 
 	// Run services (auth, gateway).
@@ -443,6 +446,14 @@ func TestOdhOperator(t *testing.T) {
 	// Run operator resilience test suites after functional tests
 	if testOpts.operatorResilienceTest {
 		mustRun(t, "Operator Resilience E2E Tests", operatorResilienceTestSuite)
+	}
+
+	// Conversion scenarios delete the singleton DSC. Run them after functional tests.
+	if conversionWebhookSuiteSelected() {
+		mustRun(t, "webhooks", func(t *testing.T) {
+			t.Helper()
+			t.Run("conversion", webhookConversionTestSuite)
+		})
 	}
 
 	// Deletion logic based on deletionPolicy
@@ -533,8 +544,14 @@ func TestMain(m *testing.M) {
 
 	pflag.Bool("test-webhook", true, "run webhook tests")
 	checkEnvVarBindingError(viper.BindEnv("test-webhook", viper.GetEnvPrefix()+"_WEBHOOK"))
-	pflag.Bool("test-dag-ordering", true, "run DAG ordering and module contract tests")
-	checkEnvVarBindingError(viper.BindEnv("test-dag-ordering", viper.GetEnvPrefix()+"_DAG_ORDERING"))
+	pflag.Bool("test-conversion-webhook", true, "run conversion webhook tests")
+	checkEnvVarBindingError(viper.BindEnv("test-conversion-webhook", viper.GetEnvPrefix()+"_CONVERSION_WEBHOOK"))
+	pflag.Bool("test-conversion-webhook-dsc", true, "run DSC conversion webhook tests")
+	checkEnvVarBindingError(viper.BindEnv("test-conversion-webhook-dsc", viper.GetEnvPrefix()+"_CONVERSION_WEBHOOK_DSC"))
+	pflag.Bool("test-conversion-webhook-platform", true, "run Platform conversion webhook tests")
+	checkEnvVarBindingError(viper.BindEnv("test-conversion-webhook-platform", viper.GetEnvPrefix()+"_CONVERSION_WEBHOOK_PLATFORM"))
+	pflag.Bool("test-platform-orchestration", true, "run platform orchestration and module contract tests")
+	checkEnvVarBindingError(viper.BindEnv("test-platform-orchestration", viper.GetEnvPrefix()+"_PLATFORM_ORCHESTRATION"))
 
 	pflag.Bool("circuit-breaker", true, "enable circuit breaker to halt tests on infrastructure failures")
 	checkEnvVarBindingError(viper.BindEnv("circuit-breaker", viper.GetEnvPrefix()+"_CIRCUIT_BREAKER"))
@@ -600,7 +617,10 @@ func TestMain(m *testing.M) {
 	testOpts.operatorResilienceTest = viper.GetBool("test-operator-resilience")
 
 	testOpts.webhookTest = viper.GetBool("test-webhook")
-	testOpts.dagOrderingTest = viper.GetBool("test-dag-ordering")
+	testOpts.conversionWebhookTest = viper.GetBool("test-conversion-webhook")
+	testOpts.conversionWebhookDSC = viper.GetBool("test-conversion-webhook-dsc")
+	testOpts.conversionWebhookPlatform = viper.GetBool("test-conversion-webhook-platform")
+	testOpts.platformOrchestrationTest = viper.GetBool("test-platform-orchestration")
 	testOpts.circuitBreakerEnabled = viper.GetBool("circuit-breaker")
 	testOpts.circuitBreakerThreshold = viper.GetInt("circuit-breaker-threshold")
 	Services.enabled = viper.GetBool("test-services")
