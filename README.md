@@ -926,6 +926,7 @@ Evn vars can be set to configure e2e tests:
 | E2E_TEST_CONVERSION_WEBHOOK_DSC          | Include DSC conversion scenarios. | `true` |
 | E2E_TEST_CONVERSION_WEBHOOK_PLATFORM     | Include Platform conversion scenarios. | `true` |
 | E2E_TEST_PLATFORM_ORCHESTRATION                    | Enable the OpenShift platform orchestration and registered-module contract suite. | `true` |
+| E2E_TEST_FAIL_ON_MODULE_CONFORMANCE                 | Fail when module contract findings are reported; useful for a focused conformance run. | `false` |
 | E2E_TEST_SERVICES                        | Enable service tests selected by `E2E_TEST_SERVICE`. | `true` |
 | E2E_TEST_SERVICE                         | Select service tests. Valid services are `auth` and `gateway`; both run by default. | `auth,gateway` |
 | E2E_AUTO_RESOLVE                         | When `true`, apply path-based selection to service tests. The platform orchestration/module contract remains unfiltered and always covers every registered module when enabled. See [Path-based test scoping](docs/e2e-testing.md#path-based-test-scoping). | `false` |
@@ -955,6 +956,7 @@ Alternatively the above configurations can be passed to e2e-tests as flags by se
 | --test-conversion-webhook-dsc | Include DSC conversion scenarios. | `true` |
 | --test-conversion-webhook-platform | Include Platform conversion scenarios. | `true` |
 | --test-platform-orchestration | Enable the OpenShift platform orchestration and registered-module contract suite. | `true` |
+| --fail-on-module-conformance | Fail when module contract findings are reported. | `false` |
 | --test-services | Enable service tests selected by `--test-service`. | `true` |
 | --test-service | Select `auth` and/or `gateway`; repeat the flag or use a comma-separated value. | `auth,gateway` |
 | --deletion-policy | Delete test resources `always`, `on-failure`, or `never`. | `always` |

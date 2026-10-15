@@ -2,7 +2,9 @@ package e2e_test
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/opendatahub-io/opendatahub-operator/v2/api/common"
+	dscApi "github.com/opendatahub-io/opendatahub-operator/v2/api/datasciencecluster/v3"
 	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules"
 	modulebuiltin "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules/builtin"
 	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/status"
@@ -46,6 +49,15 @@ func (r *moduleContractReport) record(module, message string) {
 	r.findings = append(r.findings, moduleContractFinding{module: module, message: message})
 }
 
+func (r *moduleContractReport) hasFindings() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.findings) > 0
+}
+
 func (r *moduleContractReport) log(t *testing.T) {
 	t.Helper()
 	if r == nil {
@@ -76,6 +88,9 @@ func (r *moduleContractReport) log(t *testing.T) {
 		t.Logf("  Finding: %s", finding.message)
 	}
 	t.Log("============================================================")
+	if testOpts.failOnModuleConformance {
+		t.Errorf("module conformance reported %d module configuration finding(s)", len(findings))
+	}
 }
 
 type ModuleContractTestCtx struct {
@@ -115,22 +130,37 @@ func (ctx *ModuleContractTestCtx) ValidateModuleContract(t *testing.T) {
 	expectedRelease := ctx.platformVersionFromConfigMap(t)
 	moduleCR := ctx.discoverOwnedModuleCR(t)
 
-	if !ctx.validateModuleStatusEntries(t, moduleCR, expectedRelease) {
-		return
-	}
+	statusValid := ctx.validateModuleStatusEntries(t, moduleCR, expectedRelease)
 
-	deployment := ctx.EnsureResourceExists(
-		WithMinimalObject(gvk.Deployment, types.NamespacedName{
-			Namespace: ctx.AppsNamespace,
-			Name:      moduleDeploymentName(handler),
-		}),
-		WithCondition(jq.Match(`any(.status.conditions[]; .type == "Available" and .status == "True")`)),
-		WithEventuallyTimeout(moduleContractTimeout),
-		WithEventuallyPollingInterval(15*time.Second),
-		WithCustomErrorMsg("module %s operator Deployment should be available", moduleName),
-	)
-	ctx.validateInjectedEnv(t, deployment)
-	ctx.validateSourceStatusPropagation(t)
+	t.Run("operator Deployment", func(t *testing.T) {
+		deploymentCtx := newModuleContractTestCtx(t, ctx.TestContext, ctx.registration, ctx.report)
+		deployment := deploymentCtx.EnsureResourceExists(
+			WithMinimalObject(gvk.Deployment, types.NamespacedName{
+				Namespace: deploymentCtx.AppsNamespace,
+				Name:      moduleDeploymentName(handler),
+			}),
+			WithCondition(And(
+				jq.Match(`any(.status.conditions[]; .type == "Available" and .status == "True")`),
+				jq.Match(`.status.observedGeneration == .metadata.generation`),
+				jq.Match(`(.spec.replicas // 1) == (.status.updatedReplicas // 0)`),
+				jq.Match(`(.spec.replicas // 1) == (.status.readyReplicas // 0)`),
+				jq.Match(`(.status.unavailableReplicas // 0) == 0`),
+			)),
+			WithEventuallyTimeout(moduleContractTimeout),
+			WithEventuallyPollingInterval(15*time.Second),
+			WithCustomErrorMsg("module %s operator Deployment should be fully rolled out", moduleName),
+		)
+		deploymentCtx.validateInjectedEnv(t, deployment)
+	})
+
+	t.Run("source status propagation", func(t *testing.T) {
+		if !statusValid {
+			t.Logf("Skipping source readiness propagation for module %s because its status contract is invalid", moduleName)
+			return
+		}
+		sourceCtx := newModuleContractTestCtx(t, ctx.TestContext, ctx.registration, ctx.report)
+		sourceCtx.validateSourceStatusPropagation(t, moduleCR, expectedRelease)
+	})
 }
 
 func (ctx *ModuleContractTestCtx) validateModuleStatusEntries(t *testing.T, moduleCR *unstructured.Unstructured, expectedRelease string) bool {
@@ -260,11 +290,12 @@ func (ctx *ModuleContractTestCtx) discoverOwnedModuleCR(t *testing.T) *unstructu
 	t.Helper()
 
 	ownerGVK, ownerNN := ctx.sourceOwner()
+	owner := ctx.EnsureResourceExists(WithMinimalObject(ownerGVK, ownerNN))
 	items := ctx.EnsureResourcesExist(
 		WithMinimalObject(ctx.registration.Handler.GetGVK(), types.NamespacedName{}),
 		WithCondition(ContainElement(jq.Match(
-			`any(.metadata.ownerReferences[]; .apiVersion == "%s" and .kind == "%s" and .name == "%s")`,
-			ownerGVK.GroupVersion().String(), ownerGVK.Kind, ownerNN.Name,
+			`any(.metadata.ownerReferences[]; .apiVersion == "%s" and .kind == "%s" and .name == "%s" and .uid == "%s" and .controller == true and .blockOwnerDeletion == true)`,
+			ownerGVK.GroupVersion().String(), ownerGVK.Kind, ownerNN.Name, owner.GetUID(),
 		))),
 		WithEventuallyTimeout(moduleContractTimeout),
 		WithEventuallyPollingInterval(15*time.Second),
@@ -275,9 +306,14 @@ func (ctx *ModuleContractTestCtx) discoverOwnedModuleCR(t *testing.T) *unstructu
 	)
 
 	for i := range items {
-		if hasOwnerReference(&items[i], ownerGVK.GroupVersion().String(), ownerGVK.Kind, ownerNN.Name) {
-			return &items[i]
+		if !hasControllerOwnerReference(&items[i], ownerGVK, ownerNN.Name, owner.GetUID()) {
+			continue
 		}
+		if namer, ok := ctx.registration.Handler.(interface{ GetCRName() string }); ok && namer.GetCRName() != "" {
+			require.Equal(t, namer.GetCRName(), items[i].GetName(),
+				"module %s CR should use its canonical singleton name", ctx.registration.Handler.GetName())
+		}
+		return &items[i]
 	}
 
 	require.FailNow(t, "owned module CR was not returned after successful discovery", "module: %s", ctx.registration.Handler.GetName())
@@ -316,6 +352,21 @@ func (ctx *ModuleContractTestCtx) validateInjectedEnv(t *testing.T, deployment *
 	require.NotNil(t, env, "module %s Deployment should contain container %q", ctx.registration.Handler.GetName(), containerName)
 	require.Equal(t, ctx.AppsNamespace, env["APPLICATIONS_NAMESPACE"],
 		"module %s Deployment should receive APPLICATIONS_NAMESPACE", ctx.registration.Handler.GetName())
+	if ctx.MonitoringNamespace != "" {
+		require.Equal(t, ctx.MonitoringNamespace, env["MONITORING_NAMESPACE"],
+			"module %s Deployment should receive MONITORING_NAMESPACE", ctx.registration.Handler.GetName())
+	}
+
+	platform := ctx.EnsureResourceExists(WithMinimalObject(gvk.Platform, ctx.PlatformNamespacedName))
+	require.Equal(t, platform.GetAnnotations()[annotations.PlatformType], env["ODH_MODULE_OPERATOR_PLATFORM_TYPE"],
+		"module %s Deployment should receive ODH_MODULE_OPERATOR_PLATFORM_TYPE", ctx.registration.Handler.GetName())
+
+	if provider, ok := ctx.registration.Handler.(modules.ExtraEnvProvider); ok {
+		for name, expected := range provider.GetExtraEnv() {
+			require.Equal(t, expected, env[name],
+				"module %s Deployment should receive configured extra env %s", ctx.registration.Handler.GetName(), name)
+		}
+	}
 
 	operatorEnv := ctx.platformOperatorEnv(t)
 	for _, name := range ctx.registration.Handler.GetRelatedImages() {
@@ -326,6 +377,22 @@ func (ctx *ModuleContractTestCtx) validateInjectedEnv(t *testing.T, deployment *
 		require.Equal(t, expected, env[name],
 			"module %s Deployment should receive configured related image %s",
 			ctx.registration.Handler.GetName(), name)
+	}
+
+	if imager, ok := ctx.registration.Handler.(modules.ControllerImager); ok && imager.GetControllerImage() != "" {
+		expected := operatorEnv[imager.GetControllerImage()]
+		if expected != "" {
+			require.Equal(t, expected, containerImage(containers, containerName),
+				"module %s Deployment should use configured controller image %s",
+				ctx.registration.Handler.GetName(), imager.GetControllerImage())
+			if namer, ok := ctx.registration.Handler.(modules.InitContainerNamer); ok && namer.GetInitContainerName() != "" {
+				initContainers, _, err := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "initContainers")
+				require.NoError(t, err, "read init containers from module %s Deployment", ctx.registration.Handler.GetName())
+				require.Equal(t, expected, containerImage(initContainers, namer.GetInitContainerName()),
+					"module %s Deployment init container %s should use configured controller image",
+					ctx.registration.Handler.GetName(), namer.GetInitContainerName())
+			}
+		}
 	}
 }
 
@@ -353,13 +420,15 @@ func (ctx *ModuleContractTestCtx) platformOperatorEnv(t *testing.T) map[string]s
 	return nil
 }
 
-func (ctx *ModuleContractTestCtx) validateSourceStatusPropagation(t *testing.T) {
+func (ctx *ModuleContractTestCtx) validateSourceStatusPropagation(t *testing.T, moduleCR *unstructured.Unstructured, expectedRelease string) {
 	t.Helper()
 
 	if ctx.registration.ConfigSource == modules.ConfigFromDSCI {
 		ctx.EnsureResourceExists(
 			WithMinimalObject(gvk.DSCInitialization, ctx.DSCInitializationNamespacedName),
 			WithCondition(And(
+				jq.Match(`.spec.monitoring.managementState == "Managed"`),
+				jq.Match(`.status.release.version == "%s"`, expectedRelease),
 				jq.Match(`any(.status.conditions[]; .type == "%s" and .status == "%s")`, status.ConditionTypeReady, metav1.ConditionTrue),
 				jq.Match(`any(.status.conditions[]; .type == "%s" and .status == "%s")`, status.ConditionTypeProvisioningSucceeded, metav1.ConditionTrue),
 				jq.Match(`any(.status.conditions[]; .type == "%s" and .status == "%s")`, status.ConditionMonitoringReady, metav1.ConditionTrue),
@@ -375,16 +444,41 @@ func (ctx *ModuleContractTestCtx) validateSourceStatusPropagation(t *testing.T) 
 	if typer, ok := ctx.registration.Handler.(modules.ReadyConditionTyper); ok {
 		readyType = typer.GetReadyConditionType()
 	}
-	ctx.EnsureResourceExists(
+	componentStatusKey, hasComponentStatus := dscComponentStatusJSONKey(ctx.registration.Handler.GetName())
+	if !hasComponentStatus {
+		t.Logf("module %s has no typed DSC component status field; checking condition and source release only", ctx.registration.Handler.GetName())
+		ctx.EnsureResourceExists(
+			WithMinimalObject(gvk.DataScienceCluster, ctx.DataScienceClusterNamespacedName),
+			WithCondition(And(
+				jq.Match(`any(.status.conditions[]; .type == "%s" and .status == "%s")`, readyType, metav1.ConditionTrue),
+				jq.Match(`.status.release.version == "%s"`, expectedRelease),
+			)),
+			WithEventuallyTimeout(moduleContractTimeout),
+			WithEventuallyPollingInterval(15*time.Second),
+			WithCustomErrorMsg("DSC should propagate module %s readiness and release", ctx.registration.Handler.GetName()),
+		)
+		return
+	}
+
+	dsc := ctx.EnsureResourceExists(
 		WithMinimalObject(gvk.DataScienceCluster, ctx.DataScienceClusterNamespacedName),
-		WithCondition(jq.Match(
-			`any(.status.conditions[]; .type == "%s" and .status == "%s")`,
-			readyType, metav1.ConditionTrue,
+		WithCondition(And(
+			jq.Match(`any(.status.conditions[]; .type == "%s" and .status == "%s")`, readyType, metav1.ConditionTrue),
+			jq.Match(`.status.release.version == "%s"`, expectedRelease),
+			jq.Match(`.status.components.%s.managementState == "Managed"`, componentStatusKey),
+			jq.Match(`any(.status.components.%s.releases[]; .name == "%s" and .version == "%s")`,
+				componentStatusKey, common.PlatformReleaseName, expectedRelease),
 		)),
 		WithEventuallyTimeout(moduleContractTimeout),
 		WithEventuallyPollingInterval(15*time.Second),
-		WithCustomErrorMsg("DSC should propagate module %s readiness", ctx.registration.Handler.GetName()),
+		WithCustomErrorMsg("DSC should propagate module %s readiness, release, and management state", ctx.registration.Handler.GetName()),
 	)
+	moduleReleases, _, err := unstructured.NestedSlice(moduleCR.Object, "status", "releases")
+	require.NoError(t, err, "read module %s status releases", ctx.registration.Handler.GetName())
+	dscReleases, _, err := unstructured.NestedSlice(dsc.Object, "status", "components", componentStatusKey, "releases")
+	require.NoError(t, err, "read DSC status releases for module %s", ctx.registration.Handler.GetName())
+	require.ElementsMatch(t, moduleReleases, dscReleases,
+		"DSC should mirror all status releases from module %s", ctx.registration.Handler.GetName())
 }
 
 func (ctx *ModuleContractTestCtx) platformVersionFromConfigMap(t *testing.T) string {
@@ -424,13 +518,27 @@ func (ctx *ModuleContractTestCtx) platformVersionFromConfigMap(t *testing.T) str
 	return version
 }
 
-func hasOwnerReference(obj *unstructured.Unstructured, apiVersion, kind, name string) bool {
+func hasControllerOwnerReference(obj *unstructured.Unstructured, ownerGVK schema.GroupVersionKind, name string, uid types.UID) bool {
 	for _, owner := range obj.GetOwnerReferences() {
-		if owner.APIVersion == apiVersion && owner.Kind == kind && owner.Name == name {
+		if owner.APIVersion == ownerGVK.GroupVersion().String() && owner.Kind == ownerGVK.Kind && owner.Name == name &&
+			owner.UID == uid && owner.Controller != nil && *owner.Controller &&
+			owner.BlockOwnerDeletion != nil && *owner.BlockOwnerDeletion {
 			return true
 		}
 	}
 	return false
+}
+
+func dscComponentStatusJSONKey(moduleName string) (string, bool) {
+	expectedKey := dscComponentField(moduleName)
+	statusType := reflect.TypeFor[dscApi.ComponentsStatus]()
+	for field := range statusType.Fields() {
+		key, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		if key == expectedKey {
+			return key, true
+		}
+	}
+	return "", false
 }
 
 func moduleDeploymentName(handler modules.ModuleHandler) string {
@@ -446,6 +554,18 @@ func moduleDeploymentName(handler modules.ModuleHandler) string {
 	}
 
 	return handler.GetName()
+}
+
+func containerImage(containers []any, name string) string {
+	for _, item := range containers {
+		container, ok := item.(map[string]any)
+		if !ok || container["name"] != name {
+			continue
+		}
+		image, _ := container["image"].(string)
+		return image
+	}
+	return ""
 }
 
 func containerEnv(container map[string]any) map[string]string {

@@ -322,6 +322,7 @@ Defaults and descriptions live in `tests/e2e/controller_test.go` (`TestMain`). K
 | Variable | CLI flag | Default | Description |
 |----------|----------|---------|-------------|
 | `E2E_TEST_PLATFORM_ORCHESTRATION` | `--test-platform-orchestration` | `true` | Run OpenShift Platform orchestration and every registered-module contract |
+| `E2E_TEST_FAIL_ON_MODULE_CONFORMANCE` | `--fail-on-module-conformance` | `false` | Fail when module contract findings are reported |
 | `E2E_TEST_SERVICES` | `--test-services` | `true` | Run the Services `TestGroup` |
 | `E2E_TEST_SERVICE` | `--test-service` | `auth,gateway` | Select Auth and/or Gateway service tests |
 | `E2E_TEST_DELETION_POLICY` | `--deletion-policy` | `always` | Delete test resources `never`, `always`, or `on-failure` |

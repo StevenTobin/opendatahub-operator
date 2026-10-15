@@ -175,10 +175,20 @@ func (tc *DAGOrderingTestCtx) runOpenShiftTestCases(t *testing.T) {
 		{"Report module contract failures", tc.ReportModuleContractFailures},
 	})
 
-	// Upgrade gates and runlevel progression are isolated from the initial
-	// platform convergence and module-contract checks, while sharing setup and
-	// cleanup through this parent suite.
-	t.Run("DAG_Ordering_Upgrade_E2E_Tests", tc.ValidateDAGOrderingUpgrade)
+	// Recovery and upgrade ordering require a fully conformant module set.
+	// Module-owned contract findings remain non-fatal, so skip platform assertions
+	// that depend on healthy module reconciliation rather than misclassifying them.
+	if !t.Failed() && !tc.contractReport.hasFindings() {
+		RunTestCases(t, []TestCase{
+			{"Validate platform-owned resource recovery", tc.ValidatePlatformOwnedResourceRecovery},
+		})
+	}
+
+	if t.Failed() || tc.contractReport.hasFindings() {
+		t.Log("Skipping DAG ordering upgrade checks because platform checks failed or module contract findings were reported")
+	} else {
+		t.Run("DAG_Ordering_Upgrade_E2E_Tests", tc.ValidateDAGOrderingUpgrade)
+	}
 
 	// Cleanup
 	RunTestCases(t, []TestCase{
@@ -203,7 +213,23 @@ func (tc *DAGOrderingTestCtx) ValidatePlatformConvergenceAndModuleContracts(t *t
 		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
 		WithMutateFunc(allComponentsManagedTransform()),
 	)
-	t.Log("Waiting for DataScienceCluster Ready before checking module contracts")
+	t.Log("Waiting for DataScienceCluster to observe module enablement before checking contracts")
+	tc.EnsureResourceExists(
+		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
+		WithCondition(jq.Match(`.status.observedGeneration == .metadata.generation`)),
+		WithEventuallyTimeout(5*time.Minute),
+		WithEventuallyPollingInterval(10*time.Second),
+		WithCustomErrorMsg("DataScienceCluster should observe the module enablement generation"),
+	)
+
+	tc.ValidateRegisteredModuleContracts(t)
+	if tc.contractReport.hasFindings() {
+		t.Log("Module contract findings reported; aggregate readiness is not asserted as a platform failure")
+		return
+	}
+
+	// With a conformant module set, aggregate DSC and Platform readiness is owned
+	// by the platform operator and remains a hard assertion.
 	tc.EnsureResourceExists(
 		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
 		WithCondition(And(
@@ -221,10 +247,8 @@ func (tc *DAGOrderingTestCtx) ValidatePlatformConvergenceAndModuleContracts(t *t
 		)),
 		WithEventuallyTimeout(15*time.Minute),
 		WithEventuallyPollingInterval(15*time.Second),
-		WithCustomErrorMsg("DataScienceCluster should be Ready with all modules ready before module contract checks"),
+		WithCustomErrorMsg("DataScienceCluster should be Ready with all modules ready"),
 	)
-	t.Log("DataScienceCluster is Ready with all modules ready; checking module contract entries")
-	tc.ValidateRegisteredModuleContracts(t)
 
 	tc.EnsureResourceExists(
 		WithMinimalObject(gvk.Platform, tc.PlatformNamespacedName),
@@ -241,42 +265,6 @@ func (tc *DAGOrderingTestCtx) ValidatePlatformConvergenceAndModuleContracts(t *t
 		WithEventuallyTimeout(15*time.Minute),
 		WithEventuallyPollingInterval(15*time.Second),
 	)
-}
-
-func (tc *DAGOrderingTestCtx) waitForBatchUpgradeBeforeDeployment(
-	t *testing.T,
-	batch []moduleRegistrationNode,
-	gatedDeployment types.NamespacedName,
-) {
-	t.Helper()
-
-	deadline := time.Now().Add(dagE2ERunlevelTimeout - 30*time.Second)
-	for time.Now().Before(deadline) {
-		acknowledged := true
-		for _, node := range batch {
-			moduleStatus, err := node.Handler.GetModuleStatus(tc.Context(), tc.Client())
-			if err != nil || moduleStatus.ReleaseVersion != dagTestVersion {
-				acknowledged = false
-				break
-			}
-		}
-		if acknowledged {
-			return
-		}
-
-		deployment := &unstructured.Unstructured{}
-		deployment.SetGroupVersionKind(gvk.Deployment)
-		err := tc.Client().Get(tc.Context(), gatedDeployment, deployment)
-		if !k8serr.IsNotFound(err) {
-			require.NoError(t, err, "get gated module operator Deployment")
-			t.Fatalf("later-runlevel Deployment %s was recreated before runlevel 20 acknowledged platform version %s",
-				gatedDeployment.Name, dagTestVersion)
-		}
-		time.Sleep(5 * time.Second)
-	}
-
-	t.Fatalf("runlevel 20 did not acknowledge platform version %s before the %s DAG timeout",
-		dagTestVersion, dagE2ERunlevelTimeout)
 }
 
 func (tc *DAGOrderingTestCtx) deleteModuleOperatorPods(t *testing.T, batch []moduleRegistrationNode) {
@@ -422,6 +410,89 @@ func (tc *DAGOrderingTestCtx) ValidateRegisteredModuleContracts(t *testing.T) {
 func (tc *DAGOrderingTestCtx) ReportModuleContractFailures(t *testing.T) {
 	t.Helper()
 	tc.contractReport.log(t)
+}
+
+// ValidatePlatformOwnedResourceRecovery verifies that the platform operator
+// repairs its module handoff ConfigMap and recreates one deleted module-operator
+// Deployment without inspecting module-owned operands.
+func (tc *DAGOrderingTestCtx) ValidatePlatformOwnedResourceRecovery(t *testing.T) {
+	t.Helper()
+
+	batches, err := productionModuleBatches()
+	require.NoError(t, err, "resolve production module DAG")
+	require.NotEmpty(t, batches, "production module DAG should not be empty")
+	require.NotEmpty(t, batches[0], "first production module batch should not be empty")
+
+	registration := randomModuleRegistration(t, modules.ConfigFromDSC)
+	handler := registration.Handler
+	moduleName := handler.GetName()
+	configMapNN := types.NamespacedName{
+		Namespace: tc.AppsNamespace,
+		Name:      modules.PlatformConfigName(moduleName),
+	}
+	configMap := tc.FetchResource(WithMinimalObject(gvk.ConfigMap, configMapNN))
+	require.NotNil(t, configMap, "module %s platform ConfigMap should exist", moduleName)
+	expectedVersion, found, err := unstructured.NestedString(configMap.Object, "data", modules.PlatformVersionKey)
+	require.NoError(t, err, "read module %s platform version", moduleName)
+	require.True(t, found, "module %s platform ConfigMap should publish a version", moduleName)
+	require.NotEmpty(t, expectedVersion, "module %s platform version should not be empty", moduleName)
+
+	const preservedKey = "e2e-module-owned-key"
+	t.Cleanup(func() {
+		tc.EventuallyResourcePatched(
+			WithMinimalObject(gvk.ConfigMap, configMapNN),
+			WithMutateFunc(func(obj *unstructured.Unstructured) error {
+				data, _, _ := unstructured.NestedStringMap(obj.Object, "data")
+				delete(data, preservedKey)
+				return unstructured.SetNestedStringMap(obj.Object, data, "data")
+			}),
+			WithIgnoreNotFound(true),
+		)
+	})
+
+	tc.EventuallyResourcePatched(
+		WithMinimalObject(gvk.ConfigMap, configMapNN),
+		WithMutateFunc(func(obj *unstructured.Unstructured) error {
+			data, _, _ := unstructured.NestedStringMap(obj.Object, "data")
+			if data == nil {
+				data = map[string]string{}
+			}
+			data[modules.PlatformVersionKey] = "e2e-stale-platform-version"
+			data[preservedKey] = "preserve-me"
+			return unstructured.SetNestedStringMap(obj.Object, data, "data")
+		}),
+	)
+	tc.EnsureResourceExists(
+		WithMinimalObject(gvk.ConfigMap, configMapNN),
+		WithCondition(And(
+			jq.Match(`.data.%s == "%s"`, modules.PlatformVersionKey, expectedVersion),
+			jq.Match(`.data["%s"] == "preserve-me"`, preservedKey),
+		)),
+		WithEventuallyTimeout(3*time.Minute),
+		WithEventuallyPollingInterval(5*time.Second),
+		WithCustomErrorMsg("platform should repair module %s ConfigMap without removing module-owned keys", moduleName),
+	)
+
+	deploymentNN := types.NamespacedName{
+		Namespace: tc.AppsNamespace,
+		Name:      moduleDeploymentName(handler),
+	}
+	tc.DeleteResource(
+		WithMinimalObject(gvk.Deployment, deploymentNN),
+		WithWaitForDeletion(true),
+	)
+	tc.EnsureResourceExists(
+		WithMinimalObject(gvk.Deployment, deploymentNN),
+		WithCondition(And(
+			jq.Match(`.status.observedGeneration == .metadata.generation`),
+			jq.Match(`(.spec.replicas // 1) == (.status.updatedReplicas // 0)`),
+			jq.Match(`(.spec.replicas // 1) == (.status.readyReplicas // 0)`),
+			jq.Match(`(.status.unavailableReplicas // 0) == 0`),
+		)),
+		WithEventuallyTimeout(10*time.Minute),
+		WithEventuallyPollingInterval(10*time.Second),
+		WithCustomErrorMsg("platform should recreate module %s operator Deployment", moduleName),
+	)
 }
 
 // ValidateDAGCleanup sets all components to Removed, waits for the DSC

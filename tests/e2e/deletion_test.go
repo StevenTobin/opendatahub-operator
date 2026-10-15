@@ -231,24 +231,17 @@ func (tc *DeletionTestCtx) enableFirstModuleForSource(t *testing.T, source modul
 		t.Fatalf("unsupported module config source %d", source)
 	}
 
-	for _, registration := range modulebuiltin.Registrations() {
-		if registration.ConfigSource != source {
-			continue
-		}
-
-		moduleName := registration.Handler.GetName()
-		fieldPath := append(append([]string(nil), fieldPathPrefix...), moduleName, "managementState")
-		t.Logf("Enabling %s module %q for deletion coverage", configSourceName(source), moduleName)
-		tc.EventuallyResourcePatched(
-			WithMinimalObject(parentGVK, parentNN),
-			WithMutateFunc(func(obj *unstructured.Unstructured) error {
-				return unstructured.SetNestedField(obj.Object, string(operatorv1.Managed), fieldPath...)
-			}),
-		)
-		return
-	}
-
-	t.Fatalf("no built-in module registration found for %s", configSourceName(source))
+	registration := randomModuleRegistration(t, source)
+	moduleName := registration.Handler.GetName()
+	fieldName := moduleManagementField(registration, source)
+	fieldPath := append(append([]string(nil), fieldPathPrefix...), fieldName, "managementState")
+	t.Logf("Enabling %s module %q for deletion coverage", configSourceName(source), moduleName)
+	tc.EventuallyResourcePatched(
+		WithMinimalObject(parentGVK, parentNN),
+		WithMutateFunc(func(obj *unstructured.Unstructured) error {
+			return unstructured.SetNestedField(obj.Object, string(operatorv1.Managed), fieldPath...)
+		}),
+	)
 }
 
 func (tc *DeletionTestCtx) waitForOwnedModuleCRs(

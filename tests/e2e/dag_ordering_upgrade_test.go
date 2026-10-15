@@ -32,10 +32,14 @@ func (tc *DAGOrderingTestCtx) ValidateDAGOrderingUpgrade(t *testing.T) {
 		t.Fatalf("module DAG should contain multiple runlevels")
 	}
 
-	laterRegistration := batches[1][0].ModuleRegistration
-	laterDeployment := types.NamespacedName{
-		Namespace: tc.AppsNamespace,
-		Name:      moduleDeploymentName(laterRegistration.Handler),
+	laterDeployments := make([][]types.NamespacedName, len(batches))
+	for batchIndex := 1; batchIndex < len(batches); batchIndex++ {
+		for _, node := range batches[batchIndex] {
+			laterDeployments[batchIndex] = append(laterDeployments[batchIndex], types.NamespacedName{
+				Namespace: tc.AppsNamespace,
+				Name:      moduleDeploymentName(node.Handler),
+			})
+		}
 	}
 
 	tc.createDAGQuota()
@@ -70,28 +74,34 @@ func (tc *DAGOrderingTestCtx) ValidateDAGOrderingUpgrade(t *testing.T) {
 		WithCustomErrorMsg("Platform should block later upgrade runlevels while runlevel 20 reports the old version"),
 	)
 
-	tc.DeleteResource(
-		WithMinimalObject(gvk.Deployment, laterDeployment),
-		WithWaitForDeletion(true),
-	)
-	tc.g.Consistently(func() bool {
-		deployment := &unstructured.Unstructured{}
-		deployment.SetGroupVersionKind(gvk.Deployment)
-		err := tc.Client().Get(tc.Context(), laterDeployment, deployment)
-		return k8serr.IsNotFound(err)
-	}).WithTimeout(30*time.Second).WithPolling(5*time.Second).Should(BeTrue(),
-		"later-runlevel module operator %s should remain gated", laterRegistration.Handler.GetName())
+	for batchIndex := 1; batchIndex < len(batches); batchIndex++ {
+		for _, deployment := range laterDeployments[batchIndex] {
+			tc.DeleteResource(
+				WithMinimalObject(gvk.Deployment, deployment),
+				WithWaitForDeletion(true),
+			)
+		}
+	}
 
-	t.Log("Removing quota so runlevel 20 can acknowledge the new platform version")
+	// Keep checking every later runlevel until the quota is explicitly released.
+	// This proves that blocking the first batch gates the complete remainder of the DAG,
+	// rather than only one representative Deployment from the next batch.
+	tc.requireDeploymentsAbsent(t, laterDeployments[1:]...)
+
+	t.Log("Removing quota so the first runlevel can acknowledge the new platform version")
 	tc.deleteDAGQuota()
-	tc.waitForBatchUpgradeBeforeDeployment(t, batches[0], laterDeployment)
+	tc.waitForAdjacentBatchUpgradeOrdering(t, batches, laterDeployments)
 
-	tc.EnsureResourceExists(
-		WithMinimalObject(gvk.Deployment, laterDeployment),
-		WithCondition(jq.Match(`any(.status.conditions[]; .type == "Available" and .status == "True")`)),
-		WithEventuallyTimeout(15*time.Minute),
-		WithEventuallyPollingInterval(15*time.Second),
-	)
+	for batchIndex := 1; batchIndex < len(batches); batchIndex++ {
+		for _, deployment := range laterDeployments[batchIndex] {
+			tc.EnsureResourceExists(
+				WithMinimalObject(gvk.Deployment, deployment),
+				WithCondition(jq.Match(`any(.status.conditions[]; .type == "Available" and .status == "True")`)),
+				WithEventuallyTimeout(15*time.Minute),
+				WithEventuallyPollingInterval(15*time.Second),
+			)
+		}
+	}
 	tc.EnsureResourceExists(
 		WithMinimalObject(gvk.Platform, tc.PlatformNamespacedName),
 		WithCondition(And(
@@ -107,6 +117,68 @@ func (tc *DAGOrderingTestCtx) ValidateDAGOrderingUpgrade(t *testing.T) {
 		WithEventuallyTimeout(15*time.Minute),
 		WithEventuallyPollingInterval(15*time.Second),
 	)
+}
+
+func (tc *DAGOrderingTestCtx) requireDeploymentsAbsent(t *testing.T, deploymentBatches ...[]types.NamespacedName) {
+	t.Helper()
+
+	for batchIndex, deployments := range deploymentBatches {
+		for _, deploymentName := range deployments {
+			deployment := &unstructured.Unstructured{}
+			deployment.SetGroupVersionKind(gvk.Deployment)
+			err := tc.Client().Get(tc.Context(), deploymentName, deployment)
+			if !k8serr.IsNotFound(err) {
+				require.NoError(t, err, "get gated module operator Deployment %s", deploymentName.Name)
+				t.Fatalf("module operator Deployment %s from later batch %d was recreated while the first batch was blocked",
+					deploymentName.Name, batchIndex+2)
+			}
+		}
+	}
+}
+
+func (tc *DAGOrderingTestCtx) waitForAdjacentBatchUpgradeOrdering(
+	t *testing.T,
+	batches [][]moduleRegistrationNode,
+	deployments [][]types.NamespacedName,
+) {
+	t.Helper()
+
+	deadline := time.Now().Add(dagE2ERunlevelTimeout - 30*time.Second)
+	for time.Now().Before(deadline) {
+		allBoundariesReleased := true
+		for batchIndex := range len(batches) - 1 {
+			acknowledged := true
+			for _, node := range batches[batchIndex] {
+				moduleStatus, err := node.Handler.GetModuleStatus(tc.Context(), tc.Client())
+				if err != nil || moduleStatus.ReleaseVersion != dagTestVersion {
+					acknowledged = false
+					break
+				}
+			}
+			if acknowledged {
+				continue
+			}
+
+			allBoundariesReleased = false
+			for _, deploymentName := range deployments[batchIndex+1] {
+				deployment := &unstructured.Unstructured{}
+				deployment.SetGroupVersionKind(gvk.Deployment)
+				err := tc.Client().Get(tc.Context(), deploymentName, deployment)
+				if !k8serr.IsNotFound(err) {
+					require.NoError(t, err, "get gated module operator Deployment %s", deploymentName.Name)
+					t.Fatalf("batch %d module operator Deployment %s was recreated before adjacent batch %d acknowledged platform version %s",
+						batchIndex+2, deploymentName.Name, batchIndex+1, dagTestVersion)
+				}
+			}
+		}
+		if allBoundariesReleased {
+			return
+		}
+		time.Sleep(5 * time.Second)
+	}
+
+	t.Fatalf("not all adjacent runlevel boundaries were released for platform version %s before the %s DAG timeout",
+		dagTestVersion, dagE2ERunlevelTimeout)
 }
 
 // ValidateInTreeGates verifies that gate entries compiled into the

@@ -98,6 +98,7 @@ type TestContextConfig struct {
 	conversionWebhookDSC       bool
 	conversionWebhookPlatform  bool
 	platformOrchestrationTest  bool
+	failOnModuleConformance    bool
 	circuitBreakerEnabled      bool
 	circuitBreakerThreshold    int
 	TestTimeouts               TestTimeouts
@@ -435,8 +436,9 @@ func TestOdhOperator(t *testing.T) {
 		mustRun(t, "DSCInitialization and DataScienceCluster validation E2E Tests", dscValidationTestSuite)
 	}
 
-	// Run the unified DAG ordering and module contract suite on a clean DSC.
+	// Run platform-owned upgrade preservation and orchestration contracts.
 	if testOpts.platformOrchestrationTest {
+		mustRun(t, "Deprecated Resource Preservation E2E Tests", dscInitializationDeprecatedCRDTestSuite)
 		mustRun(t, "Platform Orchestration E2E Tests", platformOrchestrationTestSuite)
 	}
 
@@ -552,6 +554,8 @@ func TestMain(m *testing.M) {
 	checkEnvVarBindingError(viper.BindEnv("test-conversion-webhook-platform", viper.GetEnvPrefix()+"_CONVERSION_WEBHOOK_PLATFORM"))
 	pflag.Bool("test-platform-orchestration", true, "run platform orchestration and module contract tests")
 	checkEnvVarBindingError(viper.BindEnv("test-platform-orchestration", viper.GetEnvPrefix()+"_PLATFORM_ORCHESTRATION"))
+	pflag.Bool("fail-on-module-conformance", false, "fail when registered module contract findings are reported")
+	checkEnvVarBindingError(viper.BindEnv("fail-on-module-conformance", viper.GetEnvPrefix()+"_FAIL_ON_MODULE_CONFORMANCE"))
 
 	pflag.Bool("circuit-breaker", true, "enable circuit breaker to halt tests on infrastructure failures")
 	checkEnvVarBindingError(viper.BindEnv("circuit-breaker", viper.GetEnvPrefix()+"_CIRCUIT_BREAKER"))
@@ -621,6 +625,7 @@ func TestMain(m *testing.M) {
 	testOpts.conversionWebhookDSC = viper.GetBool("test-conversion-webhook-dsc")
 	testOpts.conversionWebhookPlatform = viper.GetBool("test-conversion-webhook-platform")
 	testOpts.platformOrchestrationTest = viper.GetBool("test-platform-orchestration")
+	testOpts.failOnModuleConformance = viper.GetBool("fail-on-module-conformance")
 	testOpts.circuitBreakerEnabled = viper.GetBool("circuit-breaker")
 	testOpts.circuitBreakerThreshold = viper.GetInt("circuit-breaker-threshold")
 	Services.enabled = viper.GetBool("test-services")
