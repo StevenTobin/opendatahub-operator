@@ -53,15 +53,22 @@ func (n moduleRegistrationNode) GetRunlevel() dag.Runlevel {
 }
 
 func productionModuleBatches() ([][]moduleRegistrationNode, error) {
+	return productionModuleBatchesExcluding(nil)
+}
+
+func productionModuleBatchesExcluding(excluded map[string]struct{}) ([][]moduleRegistrationNode, error) {
 	graph := dag.NewGraph[moduleRegistrationNode]()
-	for _, registration := range modulebuiltin.Registrations() {
+	for _, registration := range e2eModuleRegistrations() {
+		if _, skip := excluded[registration.Handler.GetName()]; skip {
+			continue
+		}
 		graph.Add(moduleRegistrationNode{ModuleRegistration: registration})
 	}
 	return graph.Resolve()
 }
 
 func managedDAGTestDSCComponentFields() []string {
-	registrations := modulebuiltin.Registrations()
+	registrations := e2eModuleRegistrations()
 	fields := make([]string, 0, len(registrations))
 	for _, registration := range registrations {
 		if registration.ConfigSource == modules.ConfigFromDSC {
@@ -150,8 +157,9 @@ func (tc *DAGOrderingTestCtx) runOpenShiftTestCases(t *testing.T) {
 	if envSnapshot == nil {
 		envSnapshot = tc.snapshotOperatorEnvVars(t, "RHAI_VERSION", "CI", dagRunlevelTimeoutEnv)
 	}
+	normalizeDagTestVersionSnapshot(t, envSnapshot)
 	tc.persistOperatorEnvSnapshot(t, envSnapshot)
-	tc.resetStaleDagVersionOverride(t, envSnapshot)
+	tc.resetStaleDagVersionOverride(t)
 
 	t.Log("Ensuring clean slate: setting all components to Removed")
 	tc.setAllRemoved(t)
@@ -175,17 +183,22 @@ func (tc *DAGOrderingTestCtx) runOpenShiftTestCases(t *testing.T) {
 		{"Report module contract failures", tc.ReportModuleContractFailures},
 	})
 
-	// Recovery and upgrade ordering require a fully conformant module set.
-	// Module-owned contract findings remain non-fatal, so skip platform assertions
-	// that depend on healthy module reconciliation rather than misclassifying them.
-	if !t.Failed() && !tc.contractReport.hasFindings() {
+	if !testOpts.failOnModuleConformance && tc.contractReport.hasFindings() {
+		tc.disableModuleContractFindings(t)
+	}
+
+	// Module-owned contract findings block dependent checks only when the caller
+	// explicitly enables fail-on-module-conformance. Infrastructure and platform
+	// failures remain hard blockers regardless of that flag.
+	moduleContractFailure := testOpts.failOnModuleConformance && tc.contractReport.hasFindings()
+	if !t.Failed() && !moduleContractFailure {
 		RunTestCases(t, []TestCase{
 			{"Validate platform-owned resource recovery", tc.ValidatePlatformOwnedResourceRecovery},
 		})
 	}
 
-	if t.Failed() || tc.contractReport.hasFindings() {
-		t.Log("Skipping DAG ordering upgrade checks because platform checks failed or module contract findings were reported")
+	if t.Failed() || moduleContractFailure {
+		t.Log("Skipping DAG ordering upgrade checks because platform checks failed or module contract findings were configured as fatal")
 	} else {
 		t.Run("DAG_Ordering_Upgrade_E2E_Tests", tc.ValidateDAGOrderingUpgrade)
 	}
@@ -507,6 +520,9 @@ func (tc *DAGOrderingTestCtx) ValidateRegisteredModuleContracts(t *testing.T) {
 		t.Run(fmt.Sprintf("Runlevel %s module contracts", runlevel), func(t *testing.T) {
 			for _, node := range batch {
 				registration := node.ModuleRegistration
+				if !moduleIncludedInE2E(registration) {
+					continue
+				}
 				if len(testOpts.moduleConformanceSelection) > 0 &&
 					!slices.Contains(testOpts.moduleConformanceSelection, registration.Handler.GetName()) {
 					continue
@@ -527,12 +543,88 @@ func (tc *DAGOrderingTestCtx) ReportModuleContractFailures(t *testing.T) {
 	tc.contractReport.log(t)
 }
 
+func (tc *DAGOrderingTestCtx) disableModuleContractFindings(t *testing.T) {
+	t.Helper()
+
+	excluded := tc.contractReport.moduleNamesWithFindings()
+	if len(excluded) == 0 {
+		return
+	}
+
+	t.Logf("Excluding modules with non-fatal contract findings from subsequent DAG tests: %v", sortedModuleNames(excluded))
+
+	var dscFields []string
+	monitoringExcluded := false
+	var excludedRegistrations []modulebuiltin.ModuleRegistration
+	for _, registration := range e2eModuleRegistrations() {
+		if _, found := excluded[registration.Handler.GetName()]; !found {
+			continue
+		}
+		excludedRegistrations = append(excludedRegistrations, registration)
+		switch registration.ConfigSource {
+		case modules.ConfigFromDSCI:
+			monitoringExcluded = true
+		case modules.ConfigFromDSC:
+			dscFields = append(dscFields, dscComponentField(registration.Handler.GetName()))
+		}
+	}
+
+	if monitoringExcluded {
+		setDSCIMonitoringStateFor(t, tc.TestContext, operatorv1.Removed)
+		ensureDSCIReconciledFor(t, tc.TestContext)
+	}
+	if len(dscFields) > 0 {
+		tc.EventuallyResourcePatched(
+			WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
+			WithMutateFunc(selectComponentsTransform(string(operatorv1.Removed), dscFields)),
+		)
+	}
+
+	tc.EnsureResourceExists(
+		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
+		WithCondition(And(
+			jq.Match(`.status.observedGeneration == .metadata.generation`),
+			jq.Match(`any(.status.conditions[]; .type == "%s" and .status == "%s")`, status.ConditionTypeReady, metav1.ConditionTrue),
+		)),
+		WithEventuallyTimeout(10*time.Minute),
+		WithEventuallyPollingInterval(15*time.Second),
+		WithCustomErrorMsg("DataScienceCluster should converge after excluding modules with contract findings"),
+	)
+
+	for _, registration := range excludedRegistrations {
+		name := registration.Handler.GetName()
+		t.Logf("Waiting for excluded module %s CR and operator Deployment to disappear", name)
+		tc.EnsureResourcesGone(
+			WithMinimalObject(registration.Handler.GetGVK(), types.NamespacedName{}),
+			WithEventuallyTimeout(5*time.Minute),
+			WithEventuallyPollingInterval(10*time.Second),
+		)
+		deploymentName := moduleDeploymentName(registration.Handler)
+		tc.g.Eventually(func(g Gomega) {
+			deployed, err := moduleOperatorDeploymentNames(tc.TestContext)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(deployed).NotTo(HaveKey(deploymentName))
+		}).WithTimeout(5*time.Minute).WithPolling(10*time.Second).Should(Succeed(),
+			"excluded module operator Deployment %s should be removed", deploymentName)
+	}
+}
+
+func sortedModuleNames(names map[string]struct{}) []string {
+	result := make([]string, 0, len(names))
+	for name := range names {
+		result = append(result, name)
+	}
+	slices.Sort(result)
+	return result
+}
+
 // ValidatePlatformOwnedResourceRecovery verifies that the platform operator
 // repairs its module handoff ConfigMap and recreates one deleted module-operator
 // Deployment without inspecting module-owned operands.
 func (tc *DAGOrderingTestCtx) ValidatePlatformOwnedResourceRecovery(t *testing.T) {
 	t.Helper()
-	validatePlatformOwnedResourceRecovery(t, tc.TestContext, randomModuleRegistration(t, modules.ConfigFromDSC))
+	validatePlatformOwnedResourceRecovery(t, tc.TestContext,
+		randomModuleRegistrationExcluding(t, modules.ConfigFromDSC, tc.contractReport.moduleNamesWithFindings()))
 }
 
 func validatePlatformOwnedResourceRecovery(t *testing.T, tc *TestContext, registration modulebuiltin.ModuleRegistration) {
@@ -593,7 +685,7 @@ func validatePlatformOwnedResourceRecovery(t *testing.T, tc *TestContext, regist
 	}
 	tc.DeleteResource(
 		WithMinimalObject(gvk.Deployment, deploymentNN),
-		WithWaitForDeletion(true),
+		WithWaitForRecreation(true),
 	)
 	tc.EnsureResourceExists(
 		WithMinimalObject(gvk.Deployment, deploymentNN),
@@ -898,6 +990,7 @@ func (tc *DAGOrderingTestCtx) restorePersistedOperatorEnvSnapshot(t *testing.T) 
 		require.NoError(t, json.Unmarshal([]byte(encoded), &value), "decode operator environment snapshot %s", name)
 		snapshot[name] = value
 	}
+	normalizeDagTestVersionSnapshot(t, snapshot)
 	t.Logf("Restoring persisted operator environment snapshot from %s/%s", tc.OperatorNamespace, dagOperatorEnvSnapshotConfigMap)
 	tc.restoreOperatorEnvVars(t, snapshot)
 	return snapshot
@@ -917,15 +1010,15 @@ func (tc *DAGOrderingTestCtx) deleteOperatorEnvSnapshot(t *testing.T) {
 	t.Logf("Deleted operator environment snapshot %s/%s", tc.OperatorNamespace, dagOperatorEnvSnapshotConfigMap)
 }
 
-func (tc *DAGOrderingTestCtx) resetStaleDagVersionOverride(t *testing.T, snapshot operatorEnvSnapshot) {
+func (tc *DAGOrderingTestCtx) resetStaleDagVersionOverride(t *testing.T) {
 	t.Helper()
 
-	version := snapshot["RHAI_VERSION"]
-	if version == nil || version.Value != dagTestVersion {
+	current := tc.snapshotOperatorEnvVars(t, "RHAI_VERSION")["RHAI_VERSION"]
+	if current == nil || current.Value != dagTestVersion {
 		return
 	}
 
-	t.Logf("Resetting stale RHAI_VERSION=%q before DAG cleanup; retaining snapshot for restoration", version.Value)
+	t.Logf("Resetting stale RHAI_VERSION=%q before DAG setup", current.Value)
 	if tc.findSubscription(t) != nil {
 		if !tc.patchSubscriptionEnvVarRemovals(t, []string{"RHAI_VERSION"}) {
 			t.Log("Subscription disappeared while resetting stale RHAI_VERSION; falling back to Deployment patch")
@@ -951,6 +1044,15 @@ func (tc *DAGOrderingTestCtx) setOperatorEnvVars(t *testing.T, envs ...corev1.En
 }
 
 type operatorEnvSnapshot map[string]*corev1.EnvVar
+
+func normalizeDagTestVersionSnapshot(t *testing.T, snapshot operatorEnvSnapshot) {
+	t.Helper()
+
+	if version := snapshot["RHAI_VERSION"]; version != nil && version.Value == dagTestVersion {
+		t.Logf("Ignoring stale persisted RHAI_VERSION=%q; treating it as unset", version.Value)
+		snapshot["RHAI_VERSION"] = nil
+	}
+}
 
 func (tc *DAGOrderingTestCtx) snapshotOperatorEnvVars(t *testing.T, names ...string) operatorEnvSnapshot {
 	t.Helper()

@@ -87,6 +87,19 @@ func (r *moduleContractReport) hasFindings() bool {
 	return len(r.findings) > 0
 }
 
+func (r *moduleContractReport) moduleNamesWithFindings() map[string]struct{} {
+	result := make(map[string]struct{})
+	if r == nil {
+		return result
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, finding := range r.findings {
+		result[finding.module] = struct{}{}
+	}
+	return result
+}
+
 func (r *moduleContractReport) log(t *testing.T) {
 	t.Helper()
 	if r == nil {
@@ -188,7 +201,7 @@ func (ctx *ModuleContractTestCtx) ValidateModuleContract(t *testing.T) {
 			return
 		}
 		sourceCtx := newModuleContractTestCtx(t, ctx.TestContext, ctx.registration, ctx.report)
-		sourceCtx.validateSourceStatusPropagation(t, moduleCR, expectedRelease)
+		sourceCtx.validateSourceStatusPropagation(t, expectedRelease)
 	})
 
 	if testOpts.failOnModuleConformance && ctx.report.hasFindingsFor(moduleName) {
@@ -453,7 +466,7 @@ func (ctx *ModuleContractTestCtx) platformOperatorEnv(t *testing.T) map[string]s
 	return nil
 }
 
-func (ctx *ModuleContractTestCtx) validateSourceStatusPropagation(t *testing.T, moduleCR *unstructured.Unstructured, expectedRelease string) {
+func (ctx *ModuleContractTestCtx) validateSourceStatusPropagation(t *testing.T, expectedRelease string) {
 	t.Helper()
 
 	if ctx.registration.ConfigSource == modules.ConfigFromDSCI {
@@ -493,25 +506,17 @@ func (ctx *ModuleContractTestCtx) validateSourceStatusPropagation(t *testing.T, 
 		return
 	}
 
-	dsc := ctx.EnsureResourceExists(
+	ctx.EnsureResourceExists(
 		WithMinimalObject(gvk.DataScienceCluster, ctx.DataScienceClusterNamespacedName),
 		WithCondition(And(
 			jq.Match(`any(.status.conditions[]; .type == "%s" and .status == "%s")`, readyType, metav1.ConditionTrue),
 			jq.Match(`.status.release.version == "%s"`, expectedRelease),
 			jq.Match(`.status.components.%s.managementState == "Managed"`, componentStatusKey),
-			jq.Match(`any(.status.components.%s.releases[]; .name == "%s" and .version == "%s")`,
-				componentStatusKey, common.PlatformReleaseName, expectedRelease),
 		)),
 		WithEventuallyTimeout(moduleContractTimeout),
 		WithEventuallyPollingInterval(15*time.Second),
 		WithCustomErrorMsg("DSC should propagate module %s readiness, release, and management state", ctx.registration.Handler.GetName()),
 	)
-	moduleReleases, _, err := unstructured.NestedSlice(moduleCR.Object, "status", "releases")
-	require.NoError(t, err, "read module %s status releases", ctx.registration.Handler.GetName())
-	dscReleases, _, err := unstructured.NestedSlice(dsc.Object, "status", "components", componentStatusKey, "releases")
-	require.NoError(t, err, "read DSC status releases for module %s", ctx.registration.Handler.GetName())
-	require.ElementsMatch(t, moduleReleases, dscReleases,
-		"DSC should mirror all status releases from module %s", ctx.registration.Handler.GetName())
 }
 
 func (ctx *ModuleContractTestCtx) platformVersionFromConfigMap(t *testing.T) string {

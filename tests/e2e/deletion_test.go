@@ -17,6 +17,7 @@ import (
 
 	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules"
 	modulebuiltin "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules/builtin"
+	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/status"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster/gvk"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/utils/test/matchers/jq"
 
@@ -69,6 +70,16 @@ func (tc *DeletionTestCtx) TestDSCDeletion(t *testing.T) {
 
 	tc.SkipIfXKSCluster(t)
 	skipUnless(t, Tier3)
+
+	// The deletion suite can run with DSC management tests disabled. Ensure the
+	// v3 DataScienceCluster exists before discovering owned module CRs.
+	tc.EventuallyResourceCreatedOrUpdated(
+		WithObjectToCreate(CreateDSC(tc.DataScienceClusterNamespacedName.Name, tc.WorkbenchesNamespace)),
+		WithCondition(jq.Match(`any(.status.conditions[]; .type == "%s" and .status == "%s")`, status.ConditionTypeReady, metav1.ConditionTrue)),
+		WithEventuallyTimeout(tc.TestTimeouts.crCreationTimeout),
+		WithEventuallyPollingInterval(tc.TestTimeouts.defaultEventuallyPollInterval),
+		WithCustomErrorMsg("DataScienceCluster %s should be Ready before deletion coverage", tc.DataScienceClusterNamespacedName.Name),
+	)
 
 	dsci := tc.EnsureResourceExists(
 		WithMinimalObject(gvk.DSCInitialization, tc.DSCInitializationNamespacedName),

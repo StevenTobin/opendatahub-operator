@@ -1,4 +1,0 @@
-NAME                             READY   STATUS    RESTARTS   AGE   IP            NODE                           NOMINATED NODE   READINESS GATES
-rhods-operator-864749cf5-9rjcp   1/1     Running   0          10m   10.129.2.14   ip-10-0-34-176.ec2.internal    <none>           <none>
-rhods-operator-864749cf5-c75mv   1/1     Running   0          10m   10.131.0.21   ip-10-0-141-185.ec2.internal   <none>           <none>
-rhods-operator-864749cf5-n6wdx   1/1     Running   0          10m   10.128.2.17   ip-10-0-30-219.ec2.internal    <none>           <none>

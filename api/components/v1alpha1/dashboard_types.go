@@ -57,8 +57,7 @@ type MaaSConsumerPortalSpec struct {
 
 // DashboardCommonStatus defines the shared observed state of Dashboard
 type DashboardCommonStatus struct {
-	common.ComponentReleaseStatus `json:",inline"`
-	URL                           string `json:"url,omitempty"`
+	URL string `json:"url,omitempty"`
 }
 
 // DSCDashboard contains the v3 Dashboard configuration exposed in a DSC.

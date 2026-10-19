@@ -41,10 +41,8 @@ JOB_AS_NAME_PATTERN = re.compile(
     r"pull-ci-opendatahub-io-opendatahub-operator-main-(.+?)/"
 )
 
-MODULE_CONTRACT_TEST_PATTERN = re.compile(
-    r"^TestOdhOperator/Platform_Orchestration_E2E_Tests/"
-    r"Validate_runlevel_gating_and_convergence/"
-    r"Runlevel_[^/]+_module_contracts/([^/]+)(?:/|$)"
+COMPONENT_TEST_PATTERN = re.compile(
+    r"^TestOdhOperator/components/group_\d+/([^/]+)/"
 )
 
 VERSION_PATTERN = re.compile(r"^\s*VERSION\s*[?:]?=\s*(\S+)", re.MULTILINE)
@@ -261,15 +259,13 @@ def parse_classification(testcase: Element) -> FailureClassification | None:
 
 
 def extract_component(test_name: str) -> str | None:
-    """Extract the module name from a DAG contract test path.
+    """Extract the component name from a test path.
 
-    Returns the module name for paths like:
-        TestOdhOperator/Platform_Orchestration_E2E_Tests/
-        Validate_runlevel_gating_and_convergence/
-        Runlevel_20_module_contracts/dashboard
-    Returns None for service, parent, cleanup, or other platform-level tests.
+    Returns the component name for paths like:
+        TestOdhOperator/components/group_1/dashboard/Validate_component_enabled
+    Returns None for non-component tests or parent-level entries.
     """
-    match = MODULE_CONTRACT_TEST_PATTERN.match(test_name)
+    match = COMPONENT_TEST_PATTERN.match(test_name)
     if match:
         return match.group(1)
     return None

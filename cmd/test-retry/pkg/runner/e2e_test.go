@@ -34,7 +34,7 @@ func TestBuildSkipFilter(t *testing.T) {
 		NeverSkipPrefixes: []string{"TestOdhOperator/DSCInitialization_and_DataScienceCluster_management_E2E_Tests"},
 		SkipAtPrefixes: []string{
 			"TestOdhOperator/services/",
-			"TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/*/",
+			"TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/*/",
 			"TestOdhOperator/",
 		},
 	}
@@ -97,12 +97,12 @@ func TestBuildSkipFilter(t *testing.T) {
 			name: "DAG module contract test uses module level within each runlevel",
 			opts: defaultOpts,
 			aggregatedTestResult: &types.TestResult{PassedTest: []types.TestCase{
-				{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"},
-				{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard/Bootstrap:_module_CR_created_when_enabled"},
-				{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve"},
-				{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve/Lifecycle:_module_CR_owned_by_orchestrator"},
+				{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/Runlevel_20_module_contracts/dashboard"},
+				{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/Runlevel_20_module_contracts/dashboard/Bootstrap:_module_CR_created_when_enabled"},
+				{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/Runlevel_31_module_contracts/kserve"},
+				{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/Runlevel_31_module_contracts/kserve/Lifecycle:_module_CR_owned_by_orchestrator"},
 			}},
-			expected: "^TestOdhOperator$/^Platform_Orchestration_E2E_Tests$/^Validate_runlevel_gating_and_convergence$/^Runlevel_20_module_contracts$/^dashboard$|^TestOdhOperator$/^Platform_Orchestration_E2E_Tests$/^Validate_runlevel_gating_and_convergence$/^Runlevel_31_module_contracts$/^kserve$",
+			expected: "^TestOdhOperator$/^Platform_Orchestration_E2E_Tests$/^Validate_platform_convergence_and_module_contracts$/^Runlevel_20_module_contracts$/^dashboard$|^TestOdhOperator$/^Platform_Orchestration_E2E_Tests$/^Validate_platform_convergence_and_module_contracts$/^Runlevel_31_module_contracts$/^kserve$",
 		},
 		{
 			name: "dsc initialization test - should not be skipped",
@@ -121,10 +121,10 @@ func TestBuildSkipFilter(t *testing.T) {
 				{Name: "TestOdhOperator/services"},
 				{Name: "TestOdhOperator/services/auth"},
 				{Name: "TestOdhOperator/services/auth/subtest1"},
-				{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"},
-				{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard/Bootstrap:_module_CR_created_when_enabled"},
+				{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/Runlevel_20_module_contracts/dashboard"},
+				{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/Runlevel_20_module_contracts/dashboard/Bootstrap:_module_CR_created_when_enabled"},
 			}},
-			expected: "^TestOdhOperator$/^Platform_Orchestration_E2E_Tests$/^Validate_runlevel_gating_and_convergence$/^Runlevel_20_module_contracts$/^dashboard$|^TestOdhOperator$/^services$|^TestOdhOperator$/^services$/^auth$",
+			expected: "^TestOdhOperator$/^Platform_Orchestration_E2E_Tests$/^Validate_platform_convergence_and_module_contracts$/^Runlevel_20_module_contracts$/^dashboard$|^TestOdhOperator$/^services$|^TestOdhOperator$/^services$/^auth$",
 		},
 		{
 			name: "test with special regex characters",
@@ -233,18 +233,18 @@ func TestBuildSkipFilter(t *testing.T) {
 			opts: defaultOpts,
 			aggregatedTestResult: &types.TestResult{
 				PassedTest: []types.TestCase{
-					{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"},
-					{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve/contract1"},
+					{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/Runlevel_20_module_contracts/dashboard"},
+					{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/Runlevel_31_module_contracts/kserve/contract1"},
 				},
 				// Failed results do not prevent a module that later passed as a unit from being skipped.
 				FailedTest: []types.TestCase{
 					{Name: "TestOdhOperator"},
 					{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests"},
-					{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve"},
-					{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve/contract2"},
+					{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/Runlevel_31_module_contracts/kserve"},
+					{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/Runlevel_31_module_contracts/kserve/contract2"},
 				},
 			},
-			expected: "^TestOdhOperator$/^Platform_Orchestration_E2E_Tests$/^Validate_runlevel_gating_and_convergence$/^Runlevel_20_module_contracts$/^dashboard$",
+			expected: "^TestOdhOperator$/^Platform_Orchestration_E2E_Tests$/^Validate_platform_convergence_and_module_contracts$/^Runlevel_20_module_contracts$/^dashboard$",
 		},
 		{
 			name: "custom wildcard prefix with nested groups",
@@ -306,19 +306,19 @@ func TestBuildSkipFilter(t *testing.T) {
 			expected: "^TestOdhOperator$/^suite_a$/^group_1$/^alpha$|^TestOdhOperator$/^suite_b$/^group_1$/^delta$",
 		},
 		{
-			name: "monitoring-specific pattern takes precedence over general pattern",
+			name: "service-specific pattern takes precedence over general pattern",
 			opts: types.E2ETestOptions{
 				SkipAtPrefixes: []string{
-					"TestOdhOperator/monitoring/", // More specific
+					"TestOdhOperator/services/", // More specific
 					"TestOdhOperator/",
 				},
 			},
 			aggregatedTestResult: &types.TestResult{PassedTest: []types.TestCase{
-				{Name: "TestOdhOperator/monitoring/Group 5: Thanos Querier"},
-				{Name: "TestOdhOperator/monitoring/Group 5: Thanos Querier/Test ThanosQuerier deployment with metrics"},
+				{Name: "TestOdhOperator/services/auth"},
+				{Name: "TestOdhOperator/services/auth/contract"},
 			}},
-			// Should extract at Group level (monitoring pattern), not at root level (general pattern)
-			expected: "^TestOdhOperator$/^monitoring$/^Group 5: Thanos Querier$",
+			// Should extract at service level, not at root level (general pattern)
+			expected: "^TestOdhOperator$/^services$/^auth$",
 		},
 	}
 
@@ -340,7 +340,7 @@ func TestExtractTestLevel(t *testing.T) {
 		SkipAtPrefixes: []string{
 			"TestOdhOperator/Module_Focused_E2E_Tests/",
 			"TestOdhOperator/services/",
-			"TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/*/",
+			"TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/*/",
 			"TestOdhOperator/",
 		},
 	}
@@ -397,15 +397,15 @@ func TestExtractTestLevel(t *testing.T) {
 		{
 			name:       "DAG module contract test with subtest",
 			opts:       defaultOpts,
-			testName:   "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard/Bootstrap:_module_CR_created_when_enabled",
-			wantLevel:  "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard",
+			testName:   "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/Runlevel_20_module_contracts/dashboard/Bootstrap:_module_CR_created_when_enabled",
+			wantLevel:  "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/Runlevel_20_module_contracts/dashboard",
 			shouldSkip: true,
 		},
 		{
 			name:       "DAG module contract test without subtest",
 			opts:       defaultOpts,
-			testName:   "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve",
-			wantLevel:  "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve",
+			testName:   "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/Runlevel_31_module_contracts/kserve",
+			wantLevel:  "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/Runlevel_31_module_contracts/kserve",
 			shouldSkip: true,
 		},
 		{
@@ -446,8 +446,8 @@ func TestExtractTestLevel(t *testing.T) {
 		{
 			name:       "DAG module contract test with deep nesting",
 			opts:       defaultOpts,
-			testName:   "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve/lifecycle/delete/recreate",
-			wantLevel:  "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_31_module_contracts/kserve",
+			testName:   "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/Runlevel_31_module_contracts/kserve/lifecycle/delete/recreate",
+			wantLevel:  "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/Runlevel_31_module_contracts/kserve",
 			shouldSkip: true,
 		},
 		{
@@ -538,55 +538,29 @@ func TestExtractTestLevel(t *testing.T) {
 			shouldSkip: true,
 		},
 		{
-			name: "monitoring-specific pattern for group level extraction",
+			name: "service-specific pattern for service-level extraction",
 			opts: types.E2ETestOptions{
 				NeverSkipPrefixes: []string{},
 				SkipAtPrefixes: []string{
-					"TestOdhOperator/monitoring/",
+					"TestOdhOperator/services/",
 					"TestOdhOperator/",
 				},
 			},
-			testName:   "TestOdhOperator/monitoring/Group 1: Base Configuration/Auto creation of Monitoring CR",
-			wantLevel:  "TestOdhOperator/monitoring/Group 1: Base Configuration",
+			testName:   "TestOdhOperator/services/auth/contract",
+			wantLevel:  "TestOdhOperator/services/auth",
 			shouldSkip: true,
 		},
 		{
-			name: "monitoring-specific pattern extracts at group level not monitoring level",
+			name: "service-specific pattern wins over general pattern",
 			opts: types.E2ETestOptions{
 				NeverSkipPrefixes: []string{},
 				SkipAtPrefixes: []string{
-					"TestOdhOperator/monitoring/",
+					"TestOdhOperator/services/",
 					"TestOdhOperator/",
 				},
 			},
-			testName:   "TestOdhOperator/monitoring/Group 5: Thanos Querier/Test ThanosQuerier deployment",
-			wantLevel:  "TestOdhOperator/monitoring/Group 5: Thanos Querier",
-			shouldSkip: true,
-		},
-		{
-			name: "monitoring-specific pattern with special characters in group name",
-			opts: types.E2ETestOptions{
-				NeverSkipPrefixes: []string{},
-				SkipAtPrefixes: []string{
-					"TestOdhOperator/monitoring/",
-					"TestOdhOperator/",
-				},
-			},
-			testName:   "TestOdhOperator/monitoring/Group 2: Metrics & MonitoringStack/Test CR Creation",
-			wantLevel:  "TestOdhOperator/monitoring/Group 2: Metrics & MonitoringStack",
-			shouldSkip: true,
-		},
-		{
-			name: "monitoring-specific pattern (longer) wins over general pattern",
-			opts: types.E2ETestOptions{
-				NeverSkipPrefixes: []string{},
-				SkipAtPrefixes: []string{
-					"TestOdhOperator/monitoring/", // 3 parts with wildcard
-					"TestOdhOperator/",            // 1 part
-				},
-			},
-			testName:   "TestOdhOperator/monitoring/Group 8: Perses/Test Perses",
-			wantLevel:  "TestOdhOperator/monitoring/Group 8: Perses",
+			testName:   "TestOdhOperator/services/gateway/contract",
+			wantLevel:  "TestOdhOperator/services/gateway",
 			shouldSkip: true,
 		},
 	}
@@ -641,8 +615,8 @@ func TestExportJUnitBestEffort(t *testing.T) {
 		runner := &E2ETestRunner{opts: types.E2ETestOptions{JUnitOutputPath: out}}
 
 		runner.exportJUnitBestEffort(&types.TestResult{
-			PassedTest: []types.TestCase{{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard"}},
-			FailedTest: []types.TestCase{{Name: "TestOdhOperator/services/monitoring", FailureOutput: "timed out"}},
+			PassedTest: []types.TestCase{{Name: "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/Runlevel_20_module_contracts/dashboard"}},
+			FailedTest: []types.TestCase{{Name: "TestOdhOperator/services/auth", FailureOutput: "timed out"}},
 		}, "partial failure")
 
 		suite := readJUnitFile(t, out)
@@ -653,8 +627,8 @@ func TestExportJUnitBestEffort(t *testing.T) {
 		for _, tc := range suite.TestCases {
 			names = append(names, tc.Name)
 		}
-		require.Contains(t, names, "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/Runlevel_20_module_contracts/dashboard")
-		require.Contains(t, names, "TestOdhOperator/services/monitoring")
+		require.Contains(t, names, "TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_platform_convergence_and_module_contracts/Runlevel_20_module_contracts/dashboard")
+		require.Contains(t, names, "TestOdhOperator/services/auth")
 	})
 }
 

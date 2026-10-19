@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	componentApi "github.com/opendatahub-io/opendatahub-operator/v2/api/components/v1alpha1"
 	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules"
 	modulebuiltin "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules/builtin"
 )
@@ -56,22 +57,57 @@ func resolveModuleRegistration(selection []string) (modulebuiltin.ModuleRegistra
 	)
 }
 
+// e2eModuleRegistrations returns the built-in modules currently covered by
+// the rewritten E2E suite. DatabaseService remains registered in production,
+// but its module operator is not yet ready for this suite's non-XKS lifecycle.
+func e2eModuleRegistrations() []modulebuiltin.ModuleRegistration {
+	registrations := modulebuiltin.Registrations()
+	covered := make([]modulebuiltin.ModuleRegistration, 0, len(registrations))
+	for _, registration := range registrations {
+		if registration.Handler.GetName() == componentApi.DatabaseServiceComponentName {
+			continue
+		}
+		covered = append(covered, registration)
+	}
+	return covered
+}
+
+func moduleIncludedInE2E(registration modulebuiltin.ModuleRegistration) bool {
+	return registration.Handler.GetName() != componentApi.DatabaseServiceComponentName
+}
+
 func randomModuleRegistration(t *testing.T, source modules.ConfigSource) modulebuiltin.ModuleRegistration {
 	t.Helper()
+	return randomModuleRegistrationExcluding(t, source, nil)
+}
 
-	if registration, focused := selectedModuleRegistration(); focused && registration.ConfigSource == source {
-		t.Logf("Using selected %s module %q for focused coverage", configSourceName(source), registration.Handler.GetName())
-		return registration
+func randomModuleRegistrationExcluding(
+	t *testing.T,
+	source modules.ConfigSource,
+	excluded map[string]struct{},
+) modulebuiltin.ModuleRegistration {
+	t.Helper()
+
+	if registration, focused := selectedModuleRegistration(); focused &&
+		registration.ConfigSource == source && moduleIncludedInE2E(registration) {
+		if _, skip := excluded[registration.Handler.GetName()]; !skip {
+			t.Logf("Using selected %s module %q for focused coverage", configSourceName(source), registration.Handler.GetName())
+			return registration
+		}
 	}
 
 	candidates := make([]modulebuiltin.ModuleRegistration, 0)
-	for _, registration := range modulebuiltin.Registrations() {
-		if registration.ConfigSource == source {
-			candidates = append(candidates, registration)
+	for _, registration := range e2eModuleRegistrations() {
+		if registration.ConfigSource != source {
+			continue
 		}
+		if _, skip := excluded[registration.Handler.GetName()]; skip {
+			continue
+		}
+		candidates = append(candidates, registration)
 	}
 	if len(candidates) == 0 {
-		t.Fatalf("no built-in module registrations found for config source %d", source)
+		t.Fatalf("no built-in module registrations found for config source %d after exclusions", source)
 	}
 
 	index, err := rand.Int(rand.Reader, big.NewInt(int64(len(candidates))))
@@ -127,6 +163,20 @@ func TestResolveModuleRegistration(t *testing.T) {
 		_, focused, err := resolveModuleRegistration([]string{all[0].Handler.GetName(), all[1].Handler.GetName()})
 		if err == nil || focused || !strings.Contains(err.Error(), "at most one") {
 			t.Fatalf("unexpected multiple-module result: focused=%v error=%v", focused, err)
+		}
+	})
+
+	t.Run("database service is excluded from rewritten E2E coverage", func(t *testing.T) {
+		t.Parallel()
+		for _, registration := range e2eModuleRegistrations() {
+			if registration.Handler.GetName() == componentApi.DatabaseServiceComponentName {
+				t.Fatal("database service must not be enabled by the rewritten E2E suite")
+			}
+		}
+		for _, registration := range all {
+			if registration.Handler.GetName() == componentApi.DatabaseServiceComponentName && moduleIncludedInE2E(registration) {
+				t.Fatal("database service must be excluded from rewritten E2E coverage")
+			}
 		}
 	})
 }

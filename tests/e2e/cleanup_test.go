@@ -9,10 +9,16 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster/gvk"
 
 	. "github.com/onsi/gomega"
+)
+
+const (
+	kserveLLMInferenceWebhookServiceName = "llmisvc-webhook-server-service"
+	kserveLLMInferenceWebhookConfigName  = "llminferenceserviceconfig.serving.kserve.io"
 )
 
 // CleanupPreviousTestResources removes leftover resources from previous test runs.
@@ -30,6 +36,7 @@ func CleanupPreviousTestResources(t *testing.T) {
 
 	// Core owner deletion above waits for controller finalizers and module cleanup
 	// before the shared applications namespace is removed.
+	cleanupStaleKServeLLMInferenceResources(t, tc)
 	t.Logf("Cleaning up applications namespace: %s", tc.AppsNamespace)
 	tc.DeleteResource(
 		WithMinimalObject(gvk.Namespace, types.NamespacedName{Name: tc.AppsNamespace}),
@@ -95,6 +102,57 @@ func deleteDSCIAfterDSCDeletion(t *testing.T, tc *TestContext) {
 		WithMinimalObject(gvk.DSCInitialization, nn),
 		WithCustomErrorMsg("DSCInitialization instance %s was not fully deleted", nn.Name),
 	)
+}
+
+// cleanupStaleKServeLLMInferenceResources removes stale KServe resources
+// that can block namespace deletion after the KServe module has disappeared.
+// This can happen in a failed previous test and is generally unexpected.
+func cleanupStaleKServeLLMInferenceResources(t *testing.T, tc *TestContext) {
+	t.Helper()
+
+	service := &unstructured.Unstructured{}
+	service.SetGroupVersionKind(gvk.Service)
+	err := tc.Client().Get(tc.Context(), types.NamespacedName{
+		Namespace: tc.AppsNamespace,
+		Name:      kserveLLMInferenceWebhookServiceName,
+	}, service)
+	if err == nil {
+		return
+	}
+	if !k8serr.IsNotFound(err) && !meta.IsNoMatchError(err) {
+		require.NoError(t, err, "failed to check KServe LLMInferenceServiceConfig webhook Service")
+		return
+	}
+
+	t.Logf("Removing stale KServe LLMInferenceServiceConfig webhook configuration %s", kserveLLMInferenceWebhookConfigName)
+	tc.DeleteResource(
+		WithMinimalObject(gvk.ValidatingWebhookConfiguration, types.NamespacedName{Name: kserveLLMInferenceWebhookConfigName}),
+		WithIgnoreNotFound(true),
+		WithWaitForDeletion(false),
+		WithAcceptableErr(meta.IsNoMatchError, "IsNoMatchError"),
+	)
+
+	for _, configGVK := range []schema.GroupVersionKind{
+		gvk.LLMInferenceServiceConfigV1Alpha2,
+		gvk.LLMInferenceServiceConfigV1Alpha1,
+	} {
+		for _, config := range tc.FetchResources(
+			WithMinimalObject(configGVK, types.NamespacedName{Namespace: tc.AppsNamespace}),
+			WithListOptions(&client.ListOptions{Namespace: tc.AppsNamespace}),
+		) {
+			t.Logf("Removing stale KServe LLMInferenceServiceConfig %s/%s finalizer", config.GetNamespace(), config.GetName())
+			tc.DeleteResource(
+				WithMinimalObject(configGVK, types.NamespacedName{
+					Namespace: config.GetNamespace(),
+					Name:      config.GetName(),
+				}),
+				WithIgnoreNotFound(true),
+				WithWaitForDeletion(false),
+				WithRemoveFinalizersOnDelete(true),
+				WithAcceptableErr(meta.IsNoMatchError, "IsNoMatchError"),
+			)
+		}
+	}
 }
 
 func cleanupGateSourceConfigMaps(t *testing.T, tc *TestContext) {

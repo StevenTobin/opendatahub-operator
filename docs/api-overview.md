@@ -22,6 +22,23 @@ Package v1 contains API Schema definitions for the components v1 API group
 
 
 
+#### AIGatewayAIGridSpec
+
+
+
+AIGatewayAIGridSpec configures the AI Grid lifecycle: the grid CRDs and the grid operator.
+
+
+
+_Appears in:_
+- [AIGatewayCommonSpec](#aigatewaycommonspec)
+- [DSCAIGateway](#dscaigateway)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `managementState` _[ManagementState](https://pkg.go.dev/github.com/openshift/api@v0.0.0-20261002115817-f8795cdde518/operator/v1#ManagementState)_ |  |  | Enum: [Managed Removed] <br /> |
+
+
 #### AIGatewayBatchGatewaySpec
 
 
@@ -55,6 +72,7 @@ _Appears in:_
 | --- | --- | --- | --- |
 | `modelsAsAService` _[DSCModelsAsServiceSpec](#dscmodelsasservicespec)_ | ModelsAsAService controls the Models as a Service sub-component.<br />Note: the field uses "AsA" (modelsAsAService) intentionally — this matches the<br />ai-gateway-operator CRD field name (spec.modelsAsAService). The type name<br />DSCModelsAsServiceSpec is shared with the deprecated kserve.modelsAsService field<br />and predates the rename; the JSON tag is the authoritative API surface. |  |  |
 | `batchGateway` _[AIGatewayBatchGatewaySpec](#aigatewaybatchgatewayspec)_ | BatchGateway controls the batch-gateway operator sub-component. |  |  |
+| `aiGrid` _[AIGatewayAIGridSpec](#aigatewayaigridspec)_ | AIGrid controls the AI Grid sub-component. |  |  |
 
 
 #### AIGatewayCommonStatus
@@ -83,7 +101,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `instancesNamespace` _string_ | Namespace for AI Hub registries, configurable only once when AI Hub is enabled. | odh-model-registries | MaxLength: 63 <br />Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$` <br /> |
+| `instancesNamespace` _string_ | Namespace for AI Hub registries and the model catalog service.<br />Defaults to "odh-model-registries" when omitted, or when empty and Managed.<br />It may equal the platform applications namespace. A non-empty namespace<br />cannot change while AI Hub remains Managed; set Removed before changing it. | odh-model-registries | MaxLength: 63 <br />Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$` <br /> |
 
 
 #### AIHubCommonStatus
@@ -100,7 +118,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `instancesNamespace` _string_ |  |  |  |
+| `instancesNamespace` _string_ | Effective namespace projected into the AI Hub module CR; empty when Removed. |  |  |
 
 
 #### ArgoWorkflowsControllersSpec
@@ -137,6 +155,7 @@ _Appears in:_
 | `managementState` _[ManagementState](https://pkg.go.dev/github.com/openshift/api@v0.0.0-20261002115817-f8795cdde518/operator/v1#ManagementState)_ | Set to one of the following values:<br />- "Managed" : the operator is actively managing the component and trying to keep it active.<br />              It will only upgrade the component if it is safe to do so<br />- "Removed" : the operator is actively managing the component and will not install it,<br />              or if it is installed, the operator will try to remove it |  | Enum: [Managed Removed] <br /> |
 | `modelsAsAService` _[DSCModelsAsServiceSpec](#dscmodelsasservicespec)_ | ModelsAsAService controls the Models as a Service sub-component.<br />Note: the field uses "AsA" (modelsAsAService) intentionally — this matches the<br />ai-gateway-operator CRD field name (spec.modelsAsAService). The type name<br />DSCModelsAsServiceSpec is shared with the deprecated kserve.modelsAsService field<br />and predates the rename; the JSON tag is the authoritative API surface. |  |  |
 | `batchGateway` _[AIGatewayBatchGatewaySpec](#aigatewaybatchgatewayspec)_ | BatchGateway controls the batch-gateway operator sub-component. |  |  |
+| `aiGrid` _[AIGatewayAIGridSpec](#aigatewayaigridspec)_ | AIGrid controls the AI Grid sub-component. |  |  |
 
 
 #### DSCAIGatewayStatus
@@ -144,6 +163,24 @@ _Appears in:_
 
 
 DSCAIGatewayStatus struct holds the status for the AIGateway component exposed in the DSC.
+
+
+
+_Appears in:_
+- [ComponentsStatus](#componentsstatus)
+- [ComponentsStatus](#componentsstatus)
+
+| Field | Description | Default | Validation |
+| --- | --- | --- | --- |
+| `managementState` _[ManagementState](https://pkg.go.dev/github.com/openshift/api@v0.0.0-20261002115817-f8795cdde518/operator/v1#ManagementState)_ | Set to one of the following values:<br />- "Managed" : the operator is actively managing the component and trying to keep it active.<br />              It will only upgrade the component if it is safe to do so<br />- "Removed" : the operator is actively managing the component and will not install it,<br />              or if it is installed, the operator will try to remove it |  | Enum: [Managed Removed] <br /> |
+
+
+#### DSCAIGridStatus
+
+
+
+DSCAIGridStatus contains the observed state of the AIGrid submodule exposed
+in the DSC instance.
 
 
 
@@ -170,7 +207,7 @@ _Appears in:_
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
 | `managementState` _[ManagementState](https://pkg.go.dev/github.com/openshift/api@v0.0.0-20261002115817-f8795cdde518/operator/v1#ManagementState)_ | Set to one of the following values:<br />- "Managed" : the operator is actively managing the component and trying to keep it active.<br />              It will only upgrade the component if it is safe to do so<br />- "Removed" : the operator is actively managing the component and will not install it,<br />              or if it is installed, the operator will try to remove it |  | Enum: [Managed Removed] <br /> |
-| `instancesNamespace` _string_ | Namespace for AI Hub registries, configurable only once when AI Hub is enabled. | odh-model-registries | MaxLength: 63 <br />Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$` <br /> |
+| `instancesNamespace` _string_ | Namespace for AI Hub registries and the model catalog service.<br />Defaults to "odh-model-registries" when omitted, or when empty and Managed.<br />It may equal the platform applications namespace. A non-empty namespace<br />cannot change while AI Hub remains Managed; set Removed before changing it. | odh-model-registries | MaxLength: 63 <br />Pattern: `^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$` <br /> |
 
 
 #### DSCAIHubStatus
@@ -2100,6 +2137,7 @@ _Appears in:_
 | `aigateway` _[DSCAIGatewayStatus](#dscaigatewaystatus)_ | AIGateway component status. |  |  |
 | `modelsAsAService` _[DSCModelsAsServiceStatus](#dscmodelsasservicestatus)_ | ModelsAsAService submodule status (submodule of AIGateway). |  |  |
 | `batchGateway` _[DSCBatchGatewayStatus](#dscbatchgatewaystatus)_ | BatchGateway submodule status (submodule of AIGateway). |  |  |
+| `aiGrid` _[DSCAIGridStatus](#dscaigridstatus)_ | AIGrid submodule status (submodule of AIGateway). |  |  |
 | `mcplifecycleoperator` _[DSCMCPLifecycleOperatorStatus](#dscmcplifecycleoperatorstatus)_ | MCPLifecycleOperator component status. |  |  |
 | `databaseservice` _[DSCDatabaseServiceStatus](#dscdatabaseservicestatus)_ | DatabaseService module status.<br />Field name must match GVK.Kind so WriteDSCComponentStatus can find it. |  |  |
 
@@ -2232,6 +2270,7 @@ _Appears in:_
 | `aigateway` _[DSCAIGatewayStatus](#dscaigatewaystatus)_ | AIGateway component status. |  |  |
 | `modelsAsAService` _[DSCModelsAsServiceStatus](#dscmodelsasservicestatus)_ | ModelsAsAService submodule status (submodule of AIGateway). |  |  |
 | `batchGateway` _[DSCBatchGatewayStatus](#dscbatchgatewaystatus)_ | BatchGateway submodule status (submodule of AIGateway). |  |  |
+| `aiGrid` _[DSCAIGridStatus](#dscaigridstatus)_ | AIGrid submodule status (submodule of AIGateway). |  |  |
 | `mcplifecycleoperator` _[DSCMCPLifecycleOperatorStatus](#dscmcplifecycleoperatorstatus)_ | MCPLifecycleOperator component status. |  |  |
 | `databaseservice` _[DSCDatabaseServiceStatus](#dscdatabaseservicestatus)_ | DatabaseService module status. |  |  |
 
@@ -3184,7 +3223,7 @@ _Appears in:_
 | `authTimeout` _string_ | AuthTimeout is the duration Envoy waits for auth proxy responses.<br />Requests timeout with 403 if exceeded.<br />Deprecated: Use AuthProxyTimeout instead. |  | Pattern: `^([0-9]+(\.[0-9]+)?(ns\|us\|µs\|ms\|s\|m\|h))+$` <br /> |
 | `authProxyTimeout` _[Duration](https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.25/#duration-v1-meta)_ | AuthProxyTimeout defines the timeout for external authorization service calls (e.g., "5s", "10s")<br />This controls how long Envoy waits for a response from the authentication proxy before timing out 403 response. |  |  |
 | `authProxyMaxReplicas` _integer_ | AuthProxyMaxReplicas is the maximum number of replicas for the default gateway's auth proxy.<br />The HPA minimum is fixed at 2; setting the maximum to 2 fixes the replica count.<br />Additional ingress proxies are configured independently through their auth.maxReplicas. | 10 | Maximum: 10 <br />Minimum: 2 <br /> |
-| `networkPolicy` _[NetworkPolicyConfig](#networkpolicyconfig)_ | NetworkPolicy configuration for kube-auth-proxy |  |  |
+| `networkPolicy` _[NetworkPolicyConfig](#networkpolicyconfig)_ | NetworkPolicy configures NetworkPolicy behavior for kube-auth-proxy.<br />It is retained for backward compatibility and has no effect; the operator<br />always manages the kube-auth-proxy NetworkPolicy.<br />Deprecated: This setting is ignored and will be removed in a future API version. |  |  |
 | `providerCASecretName` _string_ | ProviderCASecretName is the name of the secret containing the CA certificate for the authentication provider.<br />Used when the OAuth/OIDC provider uses a self-signed or custom CA certificate.<br />Secret must exist in the gateway namespace and contain a 'ca.crt' key with the PEM-encoded CA certificate. |  |  |
 | `verifyProviderCertificate` _boolean_ | VerifyProviderCertificate controls TLS certificate verification for the authentication provider.<br />When true (default), certificates are verified against the system trust store and providerCASecretName.<br />When false, certificate verification is disabled (development/testing only).<br />WARNING: Setting this to false disables security and should only be used in non-production environments.<br />For production use with self-signed certificates, use ProviderCASecretName instead. | true |  |
 | `enableK8sTokenValidation` _boolean_ | EnableK8sTokenValidation enables Kubernetes service account token validation via TokenReview API.<br />When enabled, kube-auth-proxy validates bearer tokens as service account tokens alongside OAuth/OIDC authentication.<br />This allows service accounts to authenticate via bearer tokens while human users authenticate via OAuth/OIDC. | true |  |
@@ -3248,7 +3287,10 @@ _Appears in:_
 
 
 
-IngressPolicyConfig defines ingress NetworkPolicy rules
+IngressPolicyConfig is retained only for backward compatibility.
+
+Deprecated: This configuration is ignored. The operator always manages the
+kube-auth-proxy NetworkPolicy.
 
 
 
@@ -3257,7 +3299,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `enabled` _boolean_ | Enabled determines whether ingress rules are applied.<br />When true, creates NetworkPolicy allowing traffic only from Gateway pods and monitoring namespaces. |  | Required: \{\} <br /> |
+| `enabled` _boolean_ | Enabled is retained for backward compatibility and has no effect.<br />Deprecated: This setting is ignored. |  | Required: \{\} <br /> |
 
 
 #### Logs
@@ -3360,9 +3402,10 @@ _Appears in:_
 
 
 
-NetworkPolicyConfig defines network policy configuration for kube-auth-proxy.
-When nil or when Ingress is nil, NetworkPolicy ingress rules are enabled by default
-to restrict access to kube-auth-proxy pods.
+NetworkPolicyConfig is retained only for backward compatibility.
+
+Deprecated: This configuration is ignored. The operator always manages the
+kube-auth-proxy NetworkPolicy.
 
 
 
@@ -3371,7 +3414,7 @@ _Appears in:_
 
 | Field | Description | Default | Validation |
 | --- | --- | --- | --- |
-| `ingress` _[IngressPolicyConfig](#ingresspolicyconfig)_ | Ingress defines ingress NetworkPolicy rules.<br />When nil, ingress rules are applied by default (allows traffic from Gateway pods and monitoring namespaces).<br />When specified, Enabled must be set to true to apply rules or false to skip NetworkPolicy creation.<br />Set Enabled=false only in development environments or when using alternative network security controls. |  |  |
+| `ingress` _[IngressPolicyConfig](#ingresspolicyconfig)_ | Ingress is retained for backward compatibility and has no effect.<br />Deprecated: This setting is ignored. |  |  |
 
 
 #### OCPRouteConfig

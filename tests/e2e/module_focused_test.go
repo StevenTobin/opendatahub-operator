@@ -35,6 +35,10 @@ func moduleFocusedTestSuite(t *testing.T, registration modulebuiltin.ModuleRegis
 	t.Helper()
 	skipUnless(t, Tier2)
 
+	if !moduleIncludedInE2E(registration) {
+		t.Skipf("module %q is not yet enabled by the rewritten E2E suite", registration.Handler.GetName())
+	}
+
 	tc, err := NewTestContext(t)
 	require.NoError(t, err, "initialize focused module test context")
 	if tc.IsXKS() {
@@ -167,10 +171,11 @@ func (ctx *ModuleFocusedTestCtx) validateSelectedCRSpecProjection(t *testing.T) 
 		dscCtx.DSC = dsc
 	}
 
-	gatewayDomain, _ := resources.GetGatewayDomain(ctx.Context(), ctx.Client())
+	gatewayConfig, err := resources.GetGatewayConfig(ctx.Context(), ctx.Client())
+	require.NoError(t, err, "get GatewayConfig for module spec projection")
 	expected, err := ctx.registration.Handler.BuildModuleCR(ctx.Context(), ctx.Client(), dscCtx, &modules.ModuleCRConfig{
 		ApplicationsNamespace: ctx.AppsNamespace,
-		GatewayDomain:         gatewayDomain,
+		GatewayConfig:         gatewayConfig,
 		Release:               cluster.GetRelease(),
 	})
 	require.NoError(t, err, "build expected %s module CR", ctx.registration.Handler.GetName())

@@ -24,7 +24,7 @@ import (
 func (tc *DAGOrderingTestCtx) ValidateDAGOrderingUpgrade(t *testing.T) {
 	t.Helper()
 
-	batches, err := productionModuleBatches()
+	batches, err := productionModuleBatchesExcluding(tc.contractReport.moduleNamesWithFindings())
 	if err != nil {
 		t.Fatalf("resolve production module DAG: %v", err)
 	}

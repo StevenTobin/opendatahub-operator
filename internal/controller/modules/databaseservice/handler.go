@@ -37,10 +37,20 @@ func NewHandler() *handler {
 	return &handler{
 		BaseHandler: modules.BaseHandler{
 			Config: modules.ModuleConfig{
-				Name:            moduleName,
-				CRName:          crName,
-				ChartDir:        chartDir,
-				ReleaseName:     "opendatahub-db-operator",
+				Name:        moduleName,
+				CRName:      crName,
+				ChartDir:    chartDir,
+				ReleaseName: "opendatahub-db-operator",
+				Values: map[string]any{
+					// The dependency chart evaluates these keys directly under
+					// Helm's strict missing-key mode.
+					"nameOverride":     "",
+					"fullnameOverride": "",
+					"serviceAccount": map[string]any{
+						"name":        "",
+						"annotations": map[string]any{},
+					},
+				},
 				DeploymentName:  deploymentName,
 				ControllerImage: controllerImage,
 				GVK:             gvk.DatabaseService,
