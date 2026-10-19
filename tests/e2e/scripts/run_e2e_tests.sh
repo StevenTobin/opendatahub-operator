@@ -69,6 +69,8 @@ validate_bool E2E_TEST_PLATFORM_ORCHESTRATION
 : "${E2E_TEST_FAIL_ON_MODULE_CONFORMANCE:=false}"
 validate_bool E2E_TEST_FAIL_ON_MODULE_CONFORMANCE
 
+: "${E2E_TEST_MODULE_CONFORMANCE:=}"
+
 : "${E2E_TEST_SERVICES:=true}"
 validate_bool E2E_TEST_SERVICES
 
@@ -147,6 +149,7 @@ if [ "$USE_TEST_RETRY" = "true" ] || [ "$USE_TEST_RETRY" = "1" ]; then
     ${GITHUB_PR_FLAGS} \
     -- --test.parallel=8 \
     --fail-on-module-conformance="$E2E_TEST_FAIL_ON_MODULE_CONFORMANCE" \
+    --module-conformance="$E2E_TEST_MODULE_CONFORMANCE" \
     --deletion-policy="$E2E_TEST_DELETION_POLICY" \
     --clean-up-previous-resources="$E2E_TEST_CLEAN_UP_PREVIOUS_RESOURCES" \
     --backup-and-restore-dsci-and-dsc="$E2E_TEST_BACKUP_AND_RESTORE_DSCI_AND_DSC" \
@@ -183,6 +186,7 @@ else
     --format standard-verbose --raw-command \
     -- test2json -t -p e2e ./e2e-tests --test.run='^TestOdhOperator' --test.v=test2json --test.parallel=8 \
     --fail-on-module-conformance="$E2E_TEST_FAIL_ON_MODULE_CONFORMANCE" \
+    --module-conformance="$E2E_TEST_MODULE_CONFORMANCE" \
     --deletion-policy="$E2E_TEST_DELETION_POLICY" \
     --clean-up-previous-resources="$E2E_TEST_CLEAN_UP_PREVIOUS_RESOURCES" \
     --backup-and-restore-dsci-and-dsc="$E2E_TEST_BACKUP_AND_RESTORE_DSCI_AND_DSC" \

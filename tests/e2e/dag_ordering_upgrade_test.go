@@ -83,9 +83,9 @@ func (tc *DAGOrderingTestCtx) ValidateDAGOrderingUpgrade(t *testing.T) {
 		}
 	}
 
-	// Keep checking every later runlevel until the quota is explicitly released.
-	// This proves that blocking the first batch gates the complete remainder of the DAG,
-	// rather than only one representative Deployment from the next batch.
+	// Keep checking every later runlevel for a bounded negative window before
+	// releasing the quota. This proves that blocking the first batch gates the
+	// complete remainder of the DAG, rather than only one representative Deployment.
 	tc.requireDeploymentsAbsent(t, laterDeployments[1:]...)
 
 	t.Log("Removing quota so the first runlevel can acknowledge the new platform version")
@@ -122,18 +122,18 @@ func (tc *DAGOrderingTestCtx) ValidateDAGOrderingUpgrade(t *testing.T) {
 func (tc *DAGOrderingTestCtx) requireDeploymentsAbsent(t *testing.T, deploymentBatches ...[]types.NamespacedName) {
 	t.Helper()
 
-	for batchIndex, deployments := range deploymentBatches {
-		for _, deploymentName := range deployments {
-			deployment := &unstructured.Unstructured{}
-			deployment.SetGroupVersionKind(gvk.Deployment)
-			err := tc.Client().Get(tc.Context(), deploymentName, deployment)
-			if !k8serr.IsNotFound(err) {
-				require.NoError(t, err, "get gated module operator Deployment %s", deploymentName.Name)
-				t.Fatalf("module operator Deployment %s from later batch %d was recreated while the first batch was blocked",
+	tc.g.Consistently(func(g Gomega) {
+		for batchIndex, deployments := range deploymentBatches {
+			for _, deploymentName := range deployments {
+				deployment := &unstructured.Unstructured{}
+				deployment.SetGroupVersionKind(gvk.Deployment)
+				err := tc.Client().Get(tc.Context(), deploymentName, deployment)
+				g.Expect(k8serr.IsNotFound(err)).To(BeTrue(),
+					"module operator Deployment %s from later batch %d should remain absent while the first batch is blocked",
 					deploymentName.Name, batchIndex+2)
 			}
 		}
-	}
+	}).WithTimeout(30 * time.Second).WithPolling(5 * time.Second).Should(Succeed())
 }
 
 func (tc *DAGOrderingTestCtx) waitForAdjacentBatchUpgradeOrdering(

@@ -304,7 +304,7 @@ func (tc *DAGOrderingTestCtx) deleteModuleOperatorPods(t *testing.T, batch []mod
 	}
 }
 
-func (tc *DAGOrderingTestCtx) moduleOperatorDeploymentNames() (map[string]struct{}, error) {
+func moduleOperatorDeploymentNames(tc *TestContext) (map[string]struct{}, error) {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(gvk.Deployment.GroupVersion().WithKind("DeploymentList"))
 	if err := tc.Client().List(tc.Context(), list); err != nil {
@@ -322,39 +322,135 @@ type operatorPrerequisite struct {
 	namespacedName types.NamespacedName
 	channel        string
 	global         bool
+	// requiredBy contains built-in module registration names. An empty focused
+	// selection does not use this list: the broad suite installs every
+	// prerequisite for compatibility with the complete module set.
+	requiredBy []string
+}
+
+var modulePrerequisites = []operatorPrerequisite{
+	{
+		namespacedName: types.NamespacedName{Name: certManagerOpName, Namespace: certManagerOpNamespace},
+		channel:        certManagerOpChannel,
+		global:         true,
+		requiredBy:     []string{"aigateway", "kserve", "monitoring", "ray", "sparkoperator"},
+	},
+	{
+		namespacedName: types.NamespacedName{Name: jobSetOpName, Namespace: jobSetOpNamespace},
+		channel:        jobSetOpChannel,
+		requiredBy:     []string{"trainer"},
+	},
+	{
+		namespacedName: types.NamespacedName{Name: kuadrantOpName, Namespace: kuadrantNamespace},
+		channel:        defaultOperatorChannel,
+		global:         true,
+		requiredBy:     []string{"aigateway"},
+	},
 }
 
 func (tc *DAGOrderingTestCtx) ensureOperatorPrerequisites(t *testing.T) {
 	t.Helper()
-
-	prerequisites := []operatorPrerequisite{
-		{
-			namespacedName: types.NamespacedName{Name: certManagerOpName, Namespace: certManagerOpNamespace},
-			channel:        certManagerOpChannel,
-			global:         true,
-		},
-		{
-			namespacedName: types.NamespacedName{Name: jobSetOpName, Namespace: jobSetOpNamespace},
-			channel:        jobSetOpChannel,
-		},
-		{
-			namespacedName: types.NamespacedName{Name: kuadrantOpName, Namespace: kuadrantNamespace},
-			channel:        defaultOperatorChannel,
-			global:         true,
-		},
-	}
-
-	tc.ensureOperatorsInstalled(t, prerequisites)
-	tc.EnsureCRDEstablished("issuers.cert-manager.io")
-	tc.EnsureCRDEstablished("certificates.cert-manager.io")
-	tc.EventuallyResourceCreatedOrUpdated(
-		WithObjectToCreate(CreateJobSetOperator()),
-		WithCondition(jq.Match(`.status.conditions[] | select(.type == "Available") | .status == "True"`)),
-		WithCustomErrorMsg("JobSetOperator cluster resource should become Available"),
-	)
+	ensureOperatorPrerequisitesFor(t, tc.TestContext, nil, true)
 }
 
-func (tc *DAGOrderingTestCtx) ensureOperatorsInstalled(t *testing.T, prerequisites []operatorPrerequisite) {
+// ensureOperatorPrerequisitesFor installs only prerequisites tagged by the
+// selected module registrations. allModules preserves the broad-suite
+// behavior: every prerequisite is installed when the complete module set is
+// under test.
+func ensureOperatorPrerequisitesFor(
+	t *testing.T,
+	tc *TestContext,
+	registrations []modulebuiltin.ModuleRegistration,
+	allModules bool,
+) {
+	t.Helper()
+
+	prerequisites := prerequisitesForRegistrations(registrations, allModules)
+	ensureOperatorsInstalledFor(t, tc, prerequisites)
+
+	for _, prerequisite := range prerequisites {
+		switch prerequisite.namespacedName.Name {
+		case certManagerOpName:
+			tc.EnsureCRDEstablished("issuers.cert-manager.io")
+			tc.EnsureCRDEstablished("certificates.cert-manager.io")
+		case jobSetOpName:
+			tc.EventuallyResourceCreatedOrUpdated(
+				WithObjectToCreate(CreateJobSetOperator()),
+				WithCondition(jq.Match(`.status.conditions[] | select(.type == "Available") | .status == "True"`)),
+				WithCustomErrorMsg("JobSetOperator cluster resource should become Available"),
+			)
+		}
+	}
+}
+
+func prerequisitesForRegistrations(
+	registrations []modulebuiltin.ModuleRegistration,
+	allModules bool,
+) []operatorPrerequisite {
+	if allModules {
+		return slices.Clone(modulePrerequisites)
+	}
+
+	selected := make(map[string]struct{}, len(registrations))
+	for _, registration := range registrations {
+		selected[registration.Handler.GetName()] = struct{}{}
+	}
+
+	prerequisites := make([]operatorPrerequisite, 0, len(modulePrerequisites))
+	for _, prerequisite := range modulePrerequisites {
+		for moduleName := range selected {
+			if slices.Contains(prerequisite.requiredBy, moduleName) {
+				prerequisites = append(prerequisites, prerequisite)
+				break
+			}
+		}
+	}
+	return prerequisites
+}
+
+func TestPrerequisitesForRegistrations(t *testing.T) {
+	t.Parallel()
+
+	registrations := modulebuiltin.Registrations()
+	all := prerequisitesForRegistrations(nil, true)
+	require.Len(t, all, len(modulePrerequisites))
+
+	registrationByName := make(map[string]modulebuiltin.ModuleRegistration, len(registrations))
+	for _, registration := range registrations {
+		registrationByName[registration.Handler.GetName()] = registration
+	}
+
+	prerequisiteNames := func(moduleName string) []string {
+		registration, ok := registrationByName[moduleName]
+		require.True(t, ok, "module %q should be registered", moduleName)
+		selected := prerequisitesForRegistrations([]modulebuiltin.ModuleRegistration{registration}, false)
+		names := make([]string, 0, len(selected))
+		for _, prerequisite := range selected {
+			names = append(names, prerequisite.namespacedName.Name)
+		}
+		slices.Sort(names)
+		return names
+	}
+
+	assertPrerequisites := func(moduleName string, expected ...string) {
+		t.Helper()
+		actual := prerequisiteNames(moduleName)
+		slices.Sort(expected)
+		if len(expected) == 0 {
+			require.Empty(t, actual, "prerequisites for module %s", moduleName)
+			return
+		}
+		require.Equal(t, expected, actual, "prerequisites for module %s", moduleName)
+	}
+
+	assertPrerequisites("sparkoperator", certManagerOpName)
+	assertPrerequisites("ray", certManagerOpName)
+	assertPrerequisites("trainer", jobSetOpName)
+	assertPrerequisites("aigateway", certManagerOpName, kuadrantOpName)
+	assertPrerequisites("dashboard")
+}
+
+func ensureOperatorsInstalledFor(t *testing.T, tc *TestContext, prerequisites []operatorPrerequisite) {
 	t.Helper()
 
 	for _, prerequisite := range prerequisites {
@@ -388,6 +484,21 @@ func (tc *DAGOrderingTestCtx) ValidateRegisteredModuleContracts(t *testing.T) {
 		return
 	}
 
+	available := make(map[string]struct{})
+	for _, batch := range batches {
+		for _, node := range batch {
+			available[node.Handler.GetName()] = struct{}{}
+		}
+	}
+	for _, selected := range testOpts.moduleConformanceSelection {
+		if _, ok := available[selected]; !ok {
+			t.Errorf("unknown module-conformance selection %q", selected)
+		}
+	}
+	if t.Failed() {
+		return
+	}
+
 	for _, batch := range batches {
 		if len(batch) == 0 {
 			continue
@@ -396,6 +507,10 @@ func (tc *DAGOrderingTestCtx) ValidateRegisteredModuleContracts(t *testing.T) {
 		t.Run(fmt.Sprintf("Runlevel %s module contracts", runlevel), func(t *testing.T) {
 			for _, node := range batch {
 				registration := node.ModuleRegistration
+				if len(testOpts.moduleConformanceSelection) > 0 &&
+					!slices.Contains(testOpts.moduleConformanceSelection, registration.Handler.GetName()) {
+					continue
+				}
 				t.Run(registration.Handler.GetName(), func(t *testing.T) {
 					ctx := newModuleContractTestCtx(t, tc.TestContext, registration, tc.contractReport)
 					ctx.ValidateModuleContract(t)
@@ -417,13 +532,12 @@ func (tc *DAGOrderingTestCtx) ReportModuleContractFailures(t *testing.T) {
 // Deployment without inspecting module-owned operands.
 func (tc *DAGOrderingTestCtx) ValidatePlatformOwnedResourceRecovery(t *testing.T) {
 	t.Helper()
+	validatePlatformOwnedResourceRecovery(t, tc.TestContext, randomModuleRegistration(t, modules.ConfigFromDSC))
+}
 
-	batches, err := productionModuleBatches()
-	require.NoError(t, err, "resolve production module DAG")
-	require.NotEmpty(t, batches, "production module DAG should not be empty")
-	require.NotEmpty(t, batches[0], "first production module batch should not be empty")
+func validatePlatformOwnedResourceRecovery(t *testing.T, tc *TestContext, registration modulebuiltin.ModuleRegistration) {
+	t.Helper()
 
-	registration := randomModuleRegistration(t, modules.ConfigFromDSC)
 	handler := registration.Handler
 	moduleName := handler.GetName()
 	configMapNN := types.NamespacedName{
@@ -557,6 +671,13 @@ func selectComponentsTransform(state string, fields []string) func(*unstructured
 // setDSCIMonitoringState patches the DSCI to set monitoring management state.
 func (tc *DAGOrderingTestCtx) setDSCIMonitoringState(t *testing.T, state operatorv1.ManagementState) {
 	t.Helper()
+	setDSCIMonitoringStateFor(t, tc.TestContext, state)
+}
+
+// setDSCIMonitoringStateFor is shared by broad DAG coverage and focused module
+// coverage. Monitoring is the only built-in module configured through DSCI.
+func setDSCIMonitoringStateFor(t *testing.T, tc *TestContext, state operatorv1.ManagementState) {
+	t.Helper()
 	tc.EventuallyResourcePatched(
 		WithMinimalObject(gvk.DSCInitialization, tc.DSCInitializationNamespacedName),
 		WithMutateFunc(func(obj *unstructured.Unstructured) error {
@@ -565,18 +686,48 @@ func (tc *DAGOrderingTestCtx) setDSCIMonitoringState(t *testing.T, state operato
 	)
 }
 
+func ensureDSCIReconciledFor(t *testing.T, tc *TestContext) {
+	t.Helper()
+	tc.EnsureResourceExists(
+		WithMinimalObject(gvk.DSCInitialization, tc.DSCInitializationNamespacedName),
+		WithCondition(And(
+			jq.Match(`.status.phase == "Ready"`),
+			jq.Match(`any(.status.conditions[]; .type == "%s" and .status == "%s")`, status.ConditionTypeReconcileComplete, metav1.ConditionTrue),
+		)),
+		WithEventuallyTimeout(10*time.Minute),
+		WithEventuallyPollingInterval(15*time.Second),
+		WithCustomErrorMsg("DSCInitialization should complete reconciliation"),
+	)
+}
+
 // setAllRemoved is a reusable helper that sets all components to Removed,
 // waits for Ready=True, and verifies all component CRs are deleted.
 func (tc *DAGOrderingTestCtx) setAllRemoved(t *testing.T) {
 	t.Helper()
+	setAllRemovedFor(t, tc.TestContext)
+}
 
-	tc.setDSCIMonitoringState(t, operatorv1.Removed)
+func setAllRemovedFor(t *testing.T, tc *TestContext) {
+	t.Helper()
 
+	t.Log("Waiting for DSCInitialization to reconcile Monitoring=Removed")
+	setDSCIMonitoringStateFor(t, tc, operatorv1.Removed)
+	ensureDSCIReconciledFor(t, tc)
+	tc.EnsureResourceExists(
+		WithMinimalObject(gvk.DSCInitialization, tc.DSCInitializationNamespacedName),
+		WithCondition(jq.Match(`any(.status.conditions[]; .type == "%s" and .status == "%s" and .reason == "Removed")`, status.ConditionMonitoringReady, metav1.ConditionFalse)),
+		WithEventuallyTimeout(10*time.Minute),
+		WithEventuallyPollingInterval(15*time.Second),
+		WithCustomErrorMsg("DSCInitialization should report MonitoringReady=False after monitoring is removed"),
+	)
+
+	t.Log("Setting all DSC modules to Removed")
 	tc.EventuallyResourcePatched(
 		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
 		WithMutateFunc(allComponentsRemovedTransform()),
 	)
 
+	t.Log("Waiting for DataScienceCluster Ready after module removal")
 	tc.EnsureResourceExists(
 		WithMinimalObject(gvk.DataScienceCluster, tc.DataScienceClusterNamespacedName),
 		WithCondition(jq.Match(
@@ -587,14 +738,20 @@ func (tc *DAGOrderingTestCtx) setAllRemoved(t *testing.T) {
 		WithEventuallyPollingInterval(15*time.Second),
 	)
 
-	tc.ensureAllRemovedComponentsGone(t)
-	tc.ensureAllRemovedOperatorDeploymentsGone(t)
+	t.Log("Waiting for removed module CRs and operator Deployments to disappear")
+	ensureAllRemovedComponentsGoneFor(t, tc)
+	ensureAllRemovedOperatorDeploymentsGoneFor(t, tc)
 }
 
 // ensureAllRemovedComponentsGone verifies that every production module CR is
 // gone after its DSC/DSCI source is set to Removed. Kueue is intentionally not
 // included because it remains an in-tree component rather than a module.
 func (tc *DAGOrderingTestCtx) ensureAllRemovedComponentsGone(t *testing.T) {
+	t.Helper()
+	ensureAllRemovedComponentsGoneFor(t, tc.TestContext)
+}
+
+func ensureAllRemovedComponentsGoneFor(t *testing.T, tc *TestContext) {
 	t.Helper()
 
 	for _, registration := range modulebuiltin.Registrations() {
@@ -607,13 +764,13 @@ func (tc *DAGOrderingTestCtx) ensureAllRemovedComponentsGone(t *testing.T) {
 	}
 }
 
-func (tc *DAGOrderingTestCtx) ensureAllRemovedOperatorDeploymentsGone(t *testing.T) {
+func ensureAllRemovedOperatorDeploymentsGoneFor(t *testing.T, tc *TestContext) {
 	t.Helper()
 
 	for _, registration := range modulebuiltin.Registrations() {
 		name := moduleDeploymentName(registration.Handler)
 		tc.g.Eventually(func(g Gomega) {
-			deployed, err := tc.moduleOperatorDeploymentNames()
+			deployed, err := moduleOperatorDeploymentNames(tc)
 			g.Expect(err).NotTo(HaveOccurred())
 			g.Expect(deployed).NotTo(HaveKey(name))
 		}).WithTimeout(5*time.Minute).WithPolling(10*time.Second).Should(Succeed(),

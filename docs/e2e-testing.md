@@ -307,6 +307,7 @@ done
 | `make deploy-rhaii-local` | Deploy operator in XKS mode (KServe module + gateway service enabled) |
 | `make e2e-test-xks` | Run KinD/xKS Gateway E2E tests with the platform orchestration/module contract disabled |
 | `make e2e-test` | Run full E2E tests (requires OpenShift) |
+| `make e2e-test-module MODULE=<name>` | Run the exclusive focused lifecycle for one registered module (requires existing DSC/DSCI) |
 | `make e2e-test-single TEST="<path>"` | Run a single E2E test |
 | `make e2e-setup-cluster` | Create DSCI/DSC without running the platform orchestration/module contract |
 | `make deploy` | Deploy operator via kustomize (OpenShift) |
@@ -323,6 +324,7 @@ Defaults and descriptions live in `tests/e2e/controller_test.go` (`TestMain`). K
 |----------|----------|---------|-------------|
 | `E2E_TEST_PLATFORM_ORCHESTRATION` | `--test-platform-orchestration` | `true` | Run OpenShift Platform orchestration and every registered-module contract |
 | `E2E_TEST_FAIL_ON_MODULE_CONFORMANCE` | `--fail-on-module-conformance` | `false` | Fail when module contract findings are reported |
+| `E2E_TEST_MODULE_CONFORMANCE` | `--module-conformance` | *(all)* | Empty selects full mode; exactly one registered name selects exclusive focused mode; multiple or unknown names fail configuration |
 | `E2E_TEST_SERVICES` | `--test-services` | `true` | Run the Services `TestGroup` |
 | `E2E_TEST_SERVICE` | `--test-service` | `auth,gateway` | Select Auth and/or Gateway service tests |
 | `E2E_TEST_DELETION_POLICY` | `--deletion-policy` | `always` | Delete test resources `never`, `always`, or `on-failure` |
@@ -332,7 +334,7 @@ The historical V2-to-V3 upgrade suite and its E2E flag have been removed.
 
 ### Path-based test scoping
 
-`make e2e-test` runs `cmd/manifest-tools resolve-e2e-scope`, which classifies changed files against `tests/e2e/scripts/e2e-scope-rules.yaml`. Component/module classifications remain useful for ownership and completeness checks, but they no longer filter E2E module coverage: when `E2E_TEST_PLATFORM_ORCHESTRATION=true`, all production module registrations run through the platform orchestration contract.
+`make e2e-test` runs `cmd/manifest-tools resolve-e2e-scope`, which classifies changed files against `tests/e2e/scripts/e2e-scope-rules.yaml`. Component/module classifications remain useful for ownership and completeness checks, but they no longer filter E2E module coverage: when `E2E_TEST_PLATFORM_ORCHESTRATION=true` and no module selector is configured, all production module registrations run through the platform orchestration contract. `make e2e-test-module MODULE=<name>` is the explicit exclusive path for SHA-gating one registered module; it skips services, conversion, resilience, and platform-wide DAG suites and starts from an all-Removed module baseline.
 
 The resolver always logs its decision with the `SELECTIVE-E2E:` prefix. When `E2E_AUTO_RESOLVE=true`, the Makefile applies only the resolved **service** scope through `E2E_TEST_SERVICE`, or disables the Services group when no service is affected. Ambiguous classifications fall back to the safe full scope.
 

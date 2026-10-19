@@ -1,6 +1,7 @@
 package e2e_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
@@ -45,8 +46,36 @@ func (r *moduleContractReport) record(module, message string) {
 		return
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.findings = append(r.findings, moduleContractFinding{module: module, message: message})
+	r.mu.Unlock()
+
+	// Keep module-owned contract findings distinct from platform/infrastructure
+	// failures for test-retry and CI triage. The module name remains in the
+	// selected child-test path and in the evidence emitted here.
+	classification, err := json.Marshal(map[string]any{
+		"category":    "test",
+		"subcategory": "module-configuration",
+		"error_code":  2001,
+		"evidence":    []string{fmt.Sprintf("module=%s: %s", module, message)},
+		"confidence":  "high",
+	})
+	if err == nil {
+		fmt.Printf("FAILURE_CLASSIFICATION: %s\n", classification)
+	}
+}
+
+func (r *moduleContractReport) hasFindingsFor(module string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, finding := range r.findings {
+		if finding.module == module {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *moduleContractReport) hasFindings() bool {
@@ -88,7 +117,7 @@ func (r *moduleContractReport) log(t *testing.T) {
 		t.Logf("  Finding: %s", finding.message)
 	}
 	t.Log("============================================================")
-	if testOpts.failOnModuleConformance {
+	if testOpts.failOnModuleConformance && len(findings) > 0 {
 		t.Errorf("module conformance reported %d module configuration finding(s)", len(findings))
 	}
 }
@@ -161,6 +190,10 @@ func (ctx *ModuleContractTestCtx) ValidateModuleContract(t *testing.T) {
 		sourceCtx := newModuleContractTestCtx(t, ctx.TestContext, ctx.registration, ctx.report)
 		sourceCtx.validateSourceStatusPropagation(t, moduleCR, expectedRelease)
 	})
+
+	if testOpts.failOnModuleConformance && ctx.report.hasFindingsFor(moduleName) {
+		t.Errorf("module %s has module-configuration findings", moduleName)
+	}
 }
 
 func (ctx *ModuleContractTestCtx) validateModuleStatusEntries(t *testing.T, moduleCR *unstructured.Unstructured, expectedRelease string) bool {

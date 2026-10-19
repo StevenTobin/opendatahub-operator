@@ -54,7 +54,7 @@ func (m AIGatewaySuite) submoduleStatusesV2ToV3(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				AIGateway: componentApi.DSCAIGateway{
@@ -68,7 +68,7 @@ func (m AIGatewaySuite) submoduleStatusesV2ToV3(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.aigateway.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.batchGateway.managementState == "Managed"`),
@@ -77,7 +77,7 @@ func (m AIGatewaySuite) submoduleStatusesV2ToV3(t *testing.T) {
 		jq.Match(`.status.components.batchGateway.managementState == "Managed"`),
 	))
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.aigateway.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.batchGateway.managementState == "Managed"`),
@@ -92,7 +92,7 @@ func (m AIGatewaySuite) submoduleStatusesV3ToV2(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscApi.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscApi.DataScienceClusterSpec{
 			Components: dscApi.Components{
 				AIGateway: componentApi.DSCAIGateway{
@@ -106,7 +106,7 @@ func (m AIGatewaySuite) submoduleStatusesV3ToV2(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.aigateway.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.batchGateway.managementState == "Managed"`),
@@ -115,7 +115,7 @@ func (m AIGatewaySuite) submoduleStatusesV3ToV2(t *testing.T) {
 		jq.Match(`.status.components.batchGateway.managementState == "Managed"`),
 	))
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.aigateway.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.batchGateway.managementState == "Managed"`),
@@ -132,7 +132,7 @@ func (m AIGatewaySuite) defaultedCanonical(t *testing.T) {
 
 	w.Apply(&dscv2.DataScienceCluster{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: dscKey.Name,
+			Name: m.dscKey.Name,
 		},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
@@ -152,13 +152,13 @@ func (m AIGatewaySuite) defaultedCanonical(t *testing.T) {
 		Succeed(),
 	)
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(
 		And(
 			jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Removed"`),
 			matchers.HaveAnnotation(maasV2StateMarker, legacyManaged),
 		),
 	)
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.kserve.modelsAsService.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Removed"`),
 		jq.Match(`.status.components.modelsAsAService.managementState == "Removed"`),
@@ -171,7 +171,7 @@ func (m AIGatewaySuite) explicitCanonicalRemoved(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				Kserve: componentApi.DSCKserveV2{
@@ -197,14 +197,14 @@ func (m AIGatewaySuite) explicitCanonicalRemoved(t *testing.T) {
 		Succeed(),
 	)
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(
 		And(
 			jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Removed"`),
 			matchers.HaveAnnotation(maasV2StateMarker, legacyManaged),
 		),
 	)
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.kserve.modelsAsService.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Removed"`),
 	))
@@ -216,7 +216,7 @@ func (m AIGatewaySuite) legacyRemoved(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				Kserve: componentApi.DSCKserveV2{
@@ -240,7 +240,7 @@ func (m AIGatewaySuite) legacyRemoved(t *testing.T) {
 		Succeed(),
 	)
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(
 		And(
 			jq.Match(`.spec.components.kserve.managementState == "Managed"`),
 			jq.Match(`.spec.components.aigateway.managementState == "Managed"`),
@@ -249,7 +249,7 @@ func (m AIGatewaySuite) legacyRemoved(t *testing.T) {
 		),
 	)
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.kserve.managementState == "Managed"`),
 		jq.Match(`.spec.components.kserve.modelsAsService.managementState == "Removed"`),
 		jq.Match(`.spec.components.aigateway.managementState == "Managed"`),
@@ -263,7 +263,7 @@ func (m AIGatewaySuite) canonicalManaged(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				Kserve: componentApi.DSCKserveV2{
@@ -292,13 +292,13 @@ func (m AIGatewaySuite) canonicalManaged(t *testing.T) {
 		Succeed(),
 	)
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Managed"`),
 		Not(matchers.HaveAnnotation(maasV2StateMarker, legacyManaged)),
 	),
 	)
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.kserve.managementState == "Removed"`),
 		jq.Match(`.spec.components.kserve.modelsAsService.managementState == "Removed"`),
 		jq.Match(`.spec.components.aigateway.managementState == "Removed"`),
@@ -312,7 +312,7 @@ func (m AIGatewaySuite) legacyRemovedOmittedKserveParent(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				Kserve: componentApi.DSCKserveV2{KserveCommonSpecV2: componentApi.KserveCommonSpecV2{
@@ -326,13 +326,13 @@ func (m AIGatewaySuite) legacyRemovedOmittedKserveParent(t *testing.T) {
 		Succeed(),
 	)
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Removed"`),
 		Not(matchers.HaveAnnotation(maasV2StateMarker, legacyManaged)),
 	),
 	)
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.kserve.modelsAsService.managementState == "Removed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Removed"`),
 	))
@@ -344,7 +344,7 @@ func (m AIGatewaySuite) canonicalManagedWithKserveParent(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				Kserve: componentApi.DSCKserveV2{
@@ -373,7 +373,7 @@ func (m AIGatewaySuite) canonicalManagedWithKserveParent(t *testing.T) {
 		Succeed(),
 	)
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.kserve.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Managed"`),
@@ -381,7 +381,7 @@ func (m AIGatewaySuite) canonicalManagedWithKserveParent(t *testing.T) {
 	),
 	)
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.kserve.managementState == "Managed"`),
 		jq.Match(`.spec.components.kserve.modelsAsService.managementState == "Removed"`),
 		jq.Match(`.spec.components.aigateway.managementState == "Managed"`),
@@ -395,7 +395,7 @@ func (m AIGatewaySuite) canonicalManagedWithLegacyManaged(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				Kserve: componentApi.DSCKserveV2{
@@ -424,14 +424,14 @@ func (m AIGatewaySuite) canonicalManagedWithLegacyManaged(t *testing.T) {
 		Succeed(),
 	)
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.aigateway.managementState == "Removed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Managed"`),
 		Not(matchers.HaveAnnotation(maasV2StateMarker, legacyManaged)),
 	),
 	)
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.kserve.managementState == "Removed"`),
 		jq.Match(`.spec.components.kserve.modelsAsService.managementState == "Removed"`),
 		jq.Match(`.spec.components.aigateway.managementState == "Removed"`),
@@ -445,7 +445,7 @@ func (m AIGatewaySuite) kserveParentTransition(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				Kserve: componentApi.DSCKserveV2{
@@ -462,18 +462,18 @@ func (m AIGatewaySuite) kserveParentTransition(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Removed"`),
 		matchers.HaveAnnotation(maasV2StateMarker, legacyManaged),
 	))
-	w.Get(gvk.DataScienceClusterV3, dscKey).Eventually().
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Eventually().
 		WithTimeout(5 * time.Minute).
 		Should(And(
 			jq.Match(`.status.components.modelsAsAService.managementState == "Removed"`),
 		))
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				Kserve: componentApi.DSCKserveV2{
@@ -490,20 +490,20 @@ func (m AIGatewaySuite) kserveParentTransition(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.kserve.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Managed"`),
 		matchers.HaveAnnotation(maasV2StateMarker, legacyManaged),
 	),
 	)
-	w.Get(gvk.DataScienceClusterV3, dscKey).Eventually().
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Eventually().
 		WithTimeout(5 * time.Minute).
 		Should(
 			jq.Match(`.status.components.modelsAsAService.managementState == "Managed"`),
 		)
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.kserve.managementState == "Managed"`),
 		jq.Match(`.spec.components.kserve.modelsAsService.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.managementState == "Managed"`),
@@ -511,7 +511,7 @@ func (m AIGatewaySuite) kserveParentTransition(t *testing.T) {
 	))
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				Kserve: componentApi.DSCKserveV2{
@@ -538,7 +538,7 @@ func (m AIGatewaySuite) kserveParentTransition(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.kserve.managementState == "Removed"`),
 		jq.Match(`.spec.components.aigateway.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Removed"`),
@@ -553,7 +553,7 @@ func (m AIGatewaySuite) omittedKserveParent(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				Kserve: componentApi.DSCKserveV2{KserveCommonSpecV2: componentApi.KserveCommonSpecV2{
@@ -567,13 +567,13 @@ func (m AIGatewaySuite) omittedKserveParent(t *testing.T) {
 		Succeed(),
 	)
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Removed"`),
 		matchers.HaveAnnotation(maasV2StateMarker, legacyManaged),
 	),
 	)
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.kserve.modelsAsService.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Removed"`),
 	))
@@ -585,7 +585,7 @@ func (m AIGatewaySuite) canonicalRetirement(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				Kserve: componentApi.DSCKserveV2{
@@ -604,14 +604,14 @@ func (m AIGatewaySuite) canonicalRetirement(t *testing.T) {
 		Succeed(),
 	)
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.aigateway.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Managed"`),
 		matchers.HaveAnnotation(maasV2StateMarker, legacyManaged),
 	))
 
 	w.Apply(&dscApi.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscApi.DataScienceClusterSpec{
 			Components: dscApi.Components{AIGateway: componentApi.DSCAIGateway{
 				ManagementSpec: common.ManagementSpec{
@@ -626,7 +626,7 @@ func (m AIGatewaySuite) canonicalRetirement(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.kserve.modelsAsService.managementState == "Removed"`),
 		jq.Match(`.spec.components.aigateway.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Removed"`),
@@ -634,7 +634,7 @@ func (m AIGatewaySuite) canonicalRetirement(t *testing.T) {
 
 	w.Apply(&dscApi.DataScienceCluster{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: dscKey.Name,
+			Name: m.dscKey.Name,
 			Annotations: map[string]string{
 				maasV2StateMarker: legacyManaged,
 			},
@@ -654,7 +654,7 @@ func (m AIGatewaySuite) canonicalRetirement(t *testing.T) {
 	}).Should(Succeed())
 
 	w.Apply(&dscApi.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscApi.DataScienceClusterSpec{
 			Components: dscApi.Components{AIGateway: componentApi.DSCAIGateway{
 				ManagementSpec: common.ManagementSpec{
@@ -669,7 +669,7 @@ func (m AIGatewaySuite) canonicalRetirement(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.kserve.modelsAsService.managementState == "Removed"`),
 		jq.Match(`.spec.components.aigateway.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Managed"`),
@@ -682,7 +682,7 @@ func (m AIGatewaySuite) markerPreservation(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				Kserve: componentApi.DSCKserveV2{
@@ -701,14 +701,14 @@ func (m AIGatewaySuite) markerPreservation(t *testing.T) {
 		Succeed(),
 	)
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.aigateway.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Managed"`),
 		matchers.HaveAnnotation(maasV2StateMarker, legacyManaged),
 	))
 
 	w.Apply(&dscApi.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscApi.DataScienceClusterSpec{
 			Components: dscApi.Components{
 				Kserve: componentApi.DSCKserve{
@@ -732,7 +732,7 @@ func (m AIGatewaySuite) markerPreservation(t *testing.T) {
 
 	w.Apply(&dscApi.DataScienceCluster{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   dscKey.Name,
+			Name:   m.dscKey.Name,
 			Labels: map[string]string{maasValidation: "preserved"},
 		},
 		Spec: dscApi.DataScienceClusterSpec{
@@ -756,14 +756,14 @@ func (m AIGatewaySuite) markerPreservation(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		matchers.HaveLabel(maasValidation, "preserved"),
 		matchers.HaveAnnotation(maasV2StateMarker, legacyManaged),
 	))
 
 	w.Apply(&dscApi.DataScienceCluster{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   dscKey.Name,
+			Name:   m.dscKey.Name,
 			Labels: map[string]string{maasValidation: "preserved"},
 		},
 		Spec: dscApi.DataScienceClusterSpec{
@@ -784,7 +784,7 @@ func (m AIGatewaySuite) markerPreservation(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.aigateway.managementState == "Removed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Managed"`),
 		matchers.HaveLabel(maasValidation, "preserved"),
@@ -793,7 +793,7 @@ func (m AIGatewaySuite) markerPreservation(t *testing.T) {
 
 	w.Apply(&dscApi.DataScienceCluster{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   dscKey.Name,
+			Name:   m.dscKey.Name,
 			Labels: map[string]string{maasValidation: "preserved"},
 		},
 		Spec: dscApi.DataScienceClusterSpec{
@@ -814,7 +814,7 @@ func (m AIGatewaySuite) markerPreservation(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.kserve.managementState == "Removed"`),
 		jq.Match(`.spec.components.kserve.modelsAsService.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.managementState == "Removed"`),
@@ -829,7 +829,7 @@ func (m AIGatewaySuite) maasReadinessCondition(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				Kserve: componentApi.DSCKserveV2{
@@ -853,14 +853,14 @@ func (m AIGatewaySuite) maasReadinessCondition(t *testing.T) {
 		Succeed(),
 	)
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.aigateway.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Removed"`),
 		jq.Match(`.status.components.modelsAsAService.managementState == "Removed"`),
 	))
 
 	w.Apply(&dscApi.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscApi.DataScienceClusterSpec{
 			Components: dscApi.Components{AIGateway: componentApi.DSCAIGateway{
 				ManagementSpec: common.ManagementSpec{
@@ -875,7 +875,7 @@ func (m AIGatewaySuite) maasReadinessCondition(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.aigateway.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Managed"`),
 		jq.Match(`.status.components.modelsAsAService.managementState == "Managed"`),
@@ -888,7 +888,7 @@ func (m AIGatewaySuite) deleteAndRecreate(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				Kserve: componentApi.DSCKserveV2{
@@ -905,22 +905,22 @@ func (m AIGatewaySuite) deleteAndRecreate(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.aigateway.managementState == "Managed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Managed"`),
 		matchers.HaveAnnotation(maasV2StateMarker, legacyManaged),
 	))
 
 	w.DeleteObject(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 	}).Eventually().Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Eventually().Should(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Eventually().Should(
 		BeNil(),
 	)
 
 	w.Apply(&dscApi.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscApi.DataScienceClusterSpec{
 			Components: dscApi.Components{Kserve: componentApi.DSCKserve{
 				ManagementSpec: common.ManagementSpec{
@@ -939,7 +939,7 @@ func (m AIGatewaySuite) deleteAndRecreate(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.kserve.modelsAsService.managementState == "Removed"`),
 		jq.Match(`.spec.components.aigateway.modelsAsAService.managementState == "Removed"`),
 		jq.Match(`.status.components.modelsAsAService.managementState == "Removed"`),
@@ -951,7 +951,7 @@ func (m AIGatewaySuite) v3CanonicalManaged(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscApi.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscApi.DataScienceClusterSpec{
 			Components: dscApi.Components{
 				Kserve: componentApi.DSCKserve{
@@ -973,7 +973,7 @@ func (m AIGatewaySuite) v3CanonicalManaged(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.kserve.managementState == "Managed"`),
 		jq.Match(`.spec.components.kserve.modelsAsService.managementState == "Removed"`),
 		jq.Match(`.spec.components.aigateway.managementState == "Removed"`),
@@ -987,7 +987,7 @@ func (m AIGatewaySuite) v3CanonicalRemoved(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscApi.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscApi.DataScienceClusterSpec{
 			Components: dscApi.Components{
 				Kserve: componentApi.DSCKserve{
@@ -1009,7 +1009,7 @@ func (m AIGatewaySuite) v3CanonicalRemoved(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.kserve.managementState == "Removed"`),
 		jq.Match(`.spec.components.kserve.modelsAsService.managementState == "Removed"`),
 		jq.Match(`.spec.components.aigateway.managementState == "Removed"`),

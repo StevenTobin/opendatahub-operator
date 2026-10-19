@@ -27,7 +27,7 @@ func (m DataSuite) v2ToV3(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				FeastOperator: componentApi.DSCFeastOperator{
@@ -44,13 +44,13 @@ func (m DataSuite) v2ToV3(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.data.featureStore.managementState == "Removed"`),
 		jq.Match(`.spec.components.data.dataRegistry.managementState == "Managed"`),
 		jq.Match(`.status.components.data.managementState == "Managed"`),
 	))
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.feastoperator.managementState == "Removed"`),
 		jq.Match(`.spec.components.feastoperator.dataRegistry.managementState == "Managed"`),
 		jq.Match(`.status.components.feastoperator.managementState == "Managed"`),
@@ -61,7 +61,7 @@ func (m DataSuite) v3ToV2(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscApi.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscApi.DataScienceClusterSpec{
 			Components: dscApi.Components{
 				Data: componentApi.DSCData{
@@ -80,13 +80,13 @@ func (m DataSuite) v3ToV2(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.feastoperator.managementState == "Removed"`),
 		jq.Match(`.spec.components.feastoperator.dataRegistry.managementState == "Managed"`),
 		jq.Match(`.status.components.feastoperator.managementState == "Managed"`),
 	))
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.data.featureStore.managementState == "Removed"`),
 		jq.Match(`.spec.components.data.dataRegistry.managementState == "Managed"`),
 		jq.Match(`.status.components.data.managementState == "Managed"`),
@@ -98,7 +98,7 @@ func (m DataSuite) v2ToV3BothRemoved(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				FeastOperator: componentApi.DSCFeastOperator{
@@ -111,14 +111,14 @@ func (m DataSuite) v2ToV3BothRemoved(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.data.featureStore.managementState == "Removed"`),
 		jq.Match(`.spec.components.data.dataRegistry.managementState == "Removed"`),
 		jq.Match(`.status.components.data.managementState == "Removed"`),
 		jq.Match(`.status.conditions[] | select(.type == "DataReady") | .status == "False"`),
 	))
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.feastoperator.managementState == "Removed"`),
 		jq.Match(`.spec.components.feastoperator.dataRegistry.managementState == "Removed"`),
 		jq.Match(`.status.components.feastoperator.managementState == "Removed"`),
@@ -130,7 +130,7 @@ func (m DataSuite) v3ToV2BothRemoved(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscApi.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscApi.DataScienceClusterSpec{
 			Components: dscApi.Components{
 				Data: componentApi.DSCData{
@@ -145,14 +145,14 @@ func (m DataSuite) v3ToV2BothRemoved(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.feastoperator.managementState == "Removed"`),
 		jq.Match(`.spec.components.feastoperator.dataRegistry.managementState == "Removed"`),
 		jq.Match(`.status.components.feastoperator.managementState == "Removed"`),
 		jq.Match(`.status.conditions[] | select(.type == "FeastOperatorReady") | .status == "False"`),
 	))
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.data.featureStore.managementState == "Removed"`),
 		jq.Match(`.spec.components.data.dataRegistry.managementState == "Removed"`),
 		jq.Match(`.status.components.data.managementState == "Removed"`),

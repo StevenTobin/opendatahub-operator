@@ -222,7 +222,6 @@ func (tc *DeletionTestCtx) enableFirstModuleForSource(t *testing.T, source modul
 	case modules.ConfigFromDSC:
 		parentGVK = gvk.DataScienceCluster
 		parentNN = tc.DataScienceClusterNamespacedName
-		fieldPathPrefix = []string{"spec", "components"}
 	case modules.ConfigFromDSCI:
 		parentGVK = gvk.DSCInitialization
 		parentNN = tc.DSCInitializationNamespacedName
@@ -234,13 +233,19 @@ func (tc *DeletionTestCtx) enableFirstModuleForSource(t *testing.T, source modul
 	registration := randomModuleRegistration(t, source)
 	moduleName := registration.Handler.GetName()
 	fieldName := moduleManagementField(registration, source)
-	fieldPath := append(append([]string(nil), fieldPathPrefix...), fieldName, "managementState")
 	t.Logf("Enabling %s module %q for deletion coverage", configSourceName(source), moduleName)
+	var mutate func(*unstructured.Unstructured) error
+	if source == modules.ConfigFromDSC {
+		mutate = selectComponentsTransform(string(operatorv1.Managed), []string{fieldName})
+	} else {
+		fieldPath := append(append([]string(nil), fieldPathPrefix...), fieldName, "managementState")
+		mutate = func(obj *unstructured.Unstructured) error {
+			return unstructured.SetNestedField(obj.Object, string(operatorv1.Managed), fieldPath...)
+		}
+	}
 	tc.EventuallyResourcePatched(
 		WithMinimalObject(parentGVK, parentNN),
-		WithMutateFunc(func(obj *unstructured.Unstructured) error {
-			return unstructured.SetNestedField(obj.Object, string(operatorv1.Managed), fieldPath...)
-		}),
+		WithMutateFunc(mutate),
 	)
 }
 

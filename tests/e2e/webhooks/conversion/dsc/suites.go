@@ -15,15 +15,11 @@ import (
 	. "github.com/onsi/gomega" //nolint:staticcheck // Matchers use Gomega's test DSL.
 )
 
-const (
-	dscName                      = "default-dsc"
-	webhookSuiteOperationTimeout = 2 * time.Minute
-)
-
-var dscKey = types.NamespacedName{Name: dscName}
+const webhookSuiteOperationTimeout = 2 * time.Minute
 
 type WebhookSuite struct {
 	testContext *testf.TestContext
+	dscKey      types.NamespacedName
 }
 
 type AIGatewaySuite struct {
@@ -51,10 +47,13 @@ type LlamaStackOperatorSuite struct {
 }
 
 // Run exercises all DSC conversion scenarios through the installed webhook.
-func Run(t *testing.T, testContext *testf.TestContext) {
+func Run(t *testing.T, testContext *testf.TestContext, dscName string) {
 	t.Helper()
 
-	baseSuite := WebhookSuite{testContext: testContext}
+	baseSuite := WebhookSuite{
+		testContext: testContext,
+		dscKey:      types.NamespacedName{Name: dscName},
+	}
 	t.Run("dashboard", DashboardSuite{WebhookSuite: baseSuite}.run)
 	t.Run("aihub", AIHubSuite{WebhookSuite: baseSuite}.run)
 	t.Run("ai-gateway", AIGatewaySuite{WebhookSuite: baseSuite}.run)
@@ -71,27 +70,27 @@ func (m WebhookSuite) newScenario(t *testing.T) *testf.WithT {
 	withT := m.testContext.NewWithT(t)
 
 	withT.DeleteObject(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 	}).Eventually().
 		WithTimeout(webhookSuiteOperationTimeout).
 		WithPolling(time.Second).
 		Should(Succeed())
 
-	withT.Get(gvk.DataScienceClusterV2, dscKey).Eventually().
+	withT.Get(gvk.DataScienceClusterV2, m.dscKey).Eventually().
 		WithTimeout(webhookSuiteOperationTimeout).
 		WithPolling(time.Second).
 		Should(BeNil())
 
 	t.Cleanup(func() {
 		withT.DeleteObject(&dscv2.DataScienceCluster{
-			ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+			ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		}).Eventually().
 			WithContext(context.Background()).
 			WithTimeout(webhookSuiteOperationTimeout).
 			WithPolling(time.Second).
 			Should(Succeed())
 
-		withT.Get(gvk.DataScienceClusterV2, dscKey).Eventually().
+		withT.Get(gvk.DataScienceClusterV2, m.dscKey).Eventually().
 			WithContext(context.Background()).
 			WithTimeout(webhookSuiteOperationTimeout).
 			WithPolling(time.Second).

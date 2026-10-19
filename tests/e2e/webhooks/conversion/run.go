@@ -13,6 +13,7 @@ import (
 type Options struct {
 	RunDSC      bool
 	RunPlatform bool
+	DSCName     string
 }
 
 // Run exercises the enabled DSC and Platform conversion scenarios through the installed webhooks.
@@ -25,7 +26,7 @@ func Run(t *testing.T, options Options) {
 
 	if options.RunDSC {
 		t.Run("dsc", func(t *testing.T) {
-			dsc.Run(t, testContext)
+			dsc.Run(t, testContext, options.DSCName)
 		})
 	}
 	if options.RunPlatform {

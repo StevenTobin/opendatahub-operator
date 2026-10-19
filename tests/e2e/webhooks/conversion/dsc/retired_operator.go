@@ -34,21 +34,21 @@ func (m WebhookSuite) runRetiredOperator(
 	} {
 		t.Run("v2_v3/"+testCase.name, func(t *testing.T) {
 			w := m.newScenario(t)
-			object := &dscv2.DataScienceCluster{ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name}}
+			object := &dscv2.DataScienceCluster{ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name}}
 			if testCase.state != "" {
 				setManagementState(&object.Spec.Components, testCase.state)
 			}
 			w.Apply(object).Should(Succeed())
 
-			w.Get(gvk.DataScienceClusterV3, dscKey).Should(
+			w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(
 				jq.Match(`(.spec.components // {}) | has("%s") | not`, field),
 				"v3 object must not contain spec.components.%s", field,
 			)
-			w.Get(gvk.DataScienceClusterV3, dscKey).Should(
+			w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(
 				jq.Match(`(.status.components // {}) | has("%s") | not`, field),
 				"v3 object must not contain status.components.%s", field,
 			)
-			w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+			w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 				jq.Match(`.spec.components.%s.managementState == "%s"`, field, operatorv1.Removed),
 				jq.Match(`.status.components.%s.managementState == "%s"`, field, operatorv1.Removed),
 			))
@@ -57,17 +57,17 @@ func (m WebhookSuite) runRetiredOperator(
 
 	t.Run("v3_v2", func(t *testing.T) {
 		w := m.newScenario(t)
-		w.Apply(&dscApi.DataScienceCluster{ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name}}).Should(Succeed())
+		w.Apply(&dscApi.DataScienceCluster{ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name}}).Should(Succeed())
 
-		w.Get(gvk.DataScienceClusterV3, dscKey).Should(
+		w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(
 			jq.Match(`(.spec.components // {}) | has("%s") | not`, field),
 			"v3 object must not contain spec.components.%s", field,
 		)
-		w.Get(gvk.DataScienceClusterV3, dscKey).Should(
+		w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(
 			jq.Match(`(.status.components // {}) | has("%s") | not`, field),
 			"v3 object must not contain status.components.%s", field,
 		)
-		w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+		w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 			jq.Match(`.spec.components.%s.managementState == "%s"`, field, operatorv1.Removed),
 			jq.Match(`.status.components.%s.managementState == "%s"`, field, operatorv1.Removed),
 		))
@@ -76,7 +76,7 @@ func (m WebhookSuite) runRetiredOperator(
 	t.Run("reject_managed_create", func(t *testing.T) {
 		w := m.newScenario(t)
 		g := NewWithT(t)
-		object := &dscv2.DataScienceCluster{ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name}}
+		object := &dscv2.DataScienceCluster{ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name}}
 		setManagementState(&object.Spec.Components, operatorv1.Managed)
 		err := w.Apply(object).Get()
 		g.Expect(k8serr.IsForbidden(err)).To(BeTrue(), "a new v2 %s=Managed request must be rejected: %v", field, err)
@@ -85,11 +85,11 @@ func (m WebhookSuite) runRetiredOperator(
 	t.Run("reject_reenable_but_allow_unrelated_update", func(t *testing.T) {
 		w := m.newScenario(t)
 		g := NewWithT(t)
-		removed := &dscv2.DataScienceCluster{ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name}}
+		removed := &dscv2.DataScienceCluster{ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name}}
 		setManagementState(&removed.Spec.Components, operatorv1.Removed)
 		w.Apply(removed).Should(Succeed())
 
-		managed := &dscv2.DataScienceCluster{ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name}}
+		managed := &dscv2.DataScienceCluster{ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name}}
 		setManagementState(&managed.Spec.Components, operatorv1.Managed)
 		err := w.Apply(managed).Get()
 
@@ -97,23 +97,23 @@ func (m WebhookSuite) runRetiredOperator(
 
 		w.Apply(&dscv2.DataScienceCluster{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:   dscKey.Name,
+				Name:   m.dscKey.Name,
 				Labels: map[string]string{"unrelated-update": "allowed"},
 			},
 		}).Should(Succeed())
 
-		w.Get(gvk.DataScienceClusterV2, dscKey).Should(
+		w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(
 			matchers.HaveLabel("unrelated-update", "allowed"),
 		)
-		w.Get(gvk.DataScienceClusterV3, dscKey).Should(
+		w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(
 			jq.Match(`(.spec.components // {}) | has("%s") | not`, field),
 			"v3 object must not contain spec.components.%s", field,
 		)
-		w.Get(gvk.DataScienceClusterV3, dscKey).Should(
+		w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(
 			jq.Match(`(.status.components // {}) | has("%s") | not`, field),
 			"v3 object must not contain status.components.%s", field,
 		)
-		w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+		w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 			jq.Match(`.spec.components.%s.managementState == "%s"`, field, operatorv1.Removed),
 			jq.Match(`.status.components.%s.managementState == "%s"`, field, operatorv1.Removed),
 		))

@@ -29,7 +29,7 @@ func (m DashboardSuite) v2ToV3(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				Dashboard: componentApi.DSCDashboardV2{
@@ -48,13 +48,13 @@ func (m DashboardSuite) v2ToV3(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.dashboard.standard.managementState == "Managed"`),
 		jq.Match(`.spec.components.dashboard.maasPortal.managementState == "Removed"`),
 		jq.Match(`.status.components.dashboard.managementState == "Managed"`),
 		jq.Match(`.status.components.maasPortal.managementState == "Removed"`),
 	))
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.dashboard.managementState == "Managed"`),
 		jq.Match(`.spec.components.dashboard.maasConsumerPortal.managementState == "Removed"`),
 		jq.Match(`.status.components.dashboard.managementState == "Managed"`),
@@ -66,7 +66,7 @@ func (m DashboardSuite) v3ToV2(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscApi.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscApi.DataScienceClusterSpec{
 			Components: dscApi.Components{
 				Dashboard: componentApi.DSCDashboard{
@@ -87,13 +87,13 @@ func (m DashboardSuite) v3ToV2(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.dashboard.managementState == "Removed"`),
 		jq.Match(`.spec.components.dashboard.maasConsumerPortal.managementState == "Managed"`),
 		jq.Match(`.status.components.dashboard.managementState == "Managed"`),
 		jq.Match(`.status.components.maasConsumerPortal.managementState == "Managed"`),
 	))
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.dashboard.standard.managementState == "Removed"`),
 		jq.Match(`.spec.components.dashboard.maasPortal.managementState == "Managed"`),
 		jq.Match(`.status.components.dashboard.managementState == "Managed"`),

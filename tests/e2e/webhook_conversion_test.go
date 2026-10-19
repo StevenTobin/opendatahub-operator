@@ -142,5 +142,6 @@ func webhookConversionTestSuite(t *testing.T) {
 	conversion.Run(t, conversion.Options{
 		RunDSC:      testOpts.conversionWebhookDSC,
 		RunPlatform: testOpts.conversionWebhookPlatform,
+		DSCName:     tc.DataScienceClusterNamespacedName.Name,
 	})
 }

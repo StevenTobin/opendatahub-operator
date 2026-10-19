@@ -99,6 +99,7 @@ type TestContextConfig struct {
 	conversionWebhookPlatform  bool
 	platformOrchestrationTest  bool
 	failOnModuleConformance    bool
+	moduleConformanceSelection []string
 	circuitBreakerEnabled      bool
 	circuitBreakerThreshold    int
 	TestTimeouts               TestTimeouts
@@ -400,6 +401,14 @@ func TestOdhOperator(t *testing.T) {
 		}
 	}
 
+	if registration, focused := selectedModuleRegistration(); focused {
+		mustRun(t, "Module Focused E2E Tests", func(t *testing.T) {
+			t.Helper()
+			moduleFocusedTestSuite(t, registration)
+		})
+		return
+	}
+
 	// Back up DSCI and DSC to a temp file
 	if testOpts.backupAndRestoreDSCIandDSC {
 		dsciBackupPath, dscBackupPath := BackupDSCIandDSC(t)
@@ -556,6 +565,8 @@ func TestMain(m *testing.M) {
 	checkEnvVarBindingError(viper.BindEnv("test-platform-orchestration", viper.GetEnvPrefix()+"_PLATFORM_ORCHESTRATION"))
 	pflag.Bool("fail-on-module-conformance", false, "fail when registered module contract findings are reported")
 	checkEnvVarBindingError(viper.BindEnv("fail-on-module-conformance", viper.GetEnvPrefix()+"_FAIL_ON_MODULE_CONFORMANCE"))
+	pflag.StringSlice("module-conformance", nil, "limit module contract checks to the selected registered module names")
+	checkEnvVarBindingError(viper.BindEnv("module-conformance", viper.GetEnvPrefix()+"_MODULE_CONFORMANCE"))
 
 	pflag.Bool("circuit-breaker", true, "enable circuit breaker to halt tests on infrastructure failures")
 	checkEnvVarBindingError(viper.BindEnv("circuit-breaker", viper.GetEnvPrefix()+"_CIRCUIT_BREAKER"))
@@ -626,6 +637,11 @@ func TestMain(m *testing.M) {
 	testOpts.conversionWebhookPlatform = viper.GetBool("test-conversion-webhook-platform")
 	testOpts.platformOrchestrationTest = viper.GetBool("test-platform-orchestration")
 	testOpts.failOnModuleConformance = viper.GetBool("fail-on-module-conformance")
+	testOpts.moduleConformanceSelection = viper.GetStringSlice("module-conformance")
+	if err := validateModuleSelection(testOpts.moduleConformanceSelection); err != nil {
+		fmt.Printf("invalid module-conformance configuration: %v\n", err)
+		os.Exit(1)
+	}
 	testOpts.circuitBreakerEnabled = viper.GetBool("circuit-breaker")
 	testOpts.circuitBreakerThreshold = viper.GetInt("circuit-breaker-threshold")
 	Services.enabled = viper.GetBool("test-services")

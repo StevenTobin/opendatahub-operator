@@ -24,7 +24,7 @@ func (m KserveSuite) run(t *testing.T) {
 func (m KserveSuite) v2AdmissionRejectsWVAManaged(t *testing.T) {
 	w := m.newScenario(t)
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				Kserve: componentApi.DSCKserveV2{
@@ -42,7 +42,7 @@ func (m KserveSuite) v2AdmissionRejectsWVAManaged(t *testing.T) {
 func (m KserveSuite) v2ToV3DropsWVA(t *testing.T) {
 	w := m.newScenario(t)
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				Kserve: componentApi.DSCKserveV2{
@@ -54,10 +54,10 @@ func (m KserveSuite) v2ToV3DropsWVA(t *testing.T) {
 		},
 	}).Should(gomega.Succeed())
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(gomega.And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(gomega.And(
 		jq.Match(`(.spec.components.kserve | has("wva")) == false`),
 	))
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(
 		jq.Match(`.spec.components.kserve.wva.managementState == "Removed"`),
 	)
 }
@@ -65,7 +65,7 @@ func (m KserveSuite) v2ToV3DropsWVA(t *testing.T) {
 func (m KserveSuite) v3ToV2ProjectsWVAsRemoved(t *testing.T) {
 	w := m.newScenario(t)
 	w.Apply(&dscApi.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscApi.DataScienceClusterSpec{
 			Components: dscApi.Components{
 				Kserve: componentApi.DSCKserve{
@@ -75,10 +75,10 @@ func (m KserveSuite) v3ToV2ProjectsWVAsRemoved(t *testing.T) {
 		},
 	}).Should(gomega.Succeed())
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(
 		jq.Match(`.spec.components.kserve.wva.managementState == "Removed"`),
 	)
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(gomega.And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(gomega.And(
 		jq.Match(`(.spec.components.kserve | has("wva")) == false`),
 	))
 }

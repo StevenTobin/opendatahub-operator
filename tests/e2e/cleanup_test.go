@@ -78,23 +78,18 @@ func deleteDSCIAfterDSCDeletion(t *testing.T, tc *TestContext) {
 	t.Helper()
 
 	nn := tc.DSCInitializationNamespacedName
-	var deleteErr error
-	tc.g.Eventually(func() bool {
+	tc.g.Eventually(func() error {
 		dsci := &unstructured.Unstructured{}
 		dsci.SetGroupVersionKind(gvk.DSCInitialization)
 		dsci.SetName(nn.Name)
-		deleteErr = tc.Client().Delete(tc.Context(), dsci)
+		deleteErr := tc.Client().Delete(tc.Context(), dsci)
 		if k8serr.IsNotFound(deleteErr) {
-			return true
+			return nil
 		}
-		if k8serr.IsForbidden(deleteErr) {
-			return false
-		}
-		require.NoError(t, deleteErr, "Failed to delete DSCInitialization instance %s", nn.Name)
-		return true
+		return deleteErr
 	}).WithTimeout(tc.TestTimeouts.mediumEventuallyTimeout).
 		WithPolling(tc.TestTimeouts.defaultEventuallyPollInterval).
-		Should(BeTrue(), "DSCInitialization deletion remained blocked: %v", deleteErr)
+		Should(Succeed(), "DSCInitialization deletion remained blocked")
 
 	tc.EnsureResourceGone(
 		WithMinimalObject(gvk.DSCInitialization, nn),

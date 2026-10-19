@@ -338,6 +338,7 @@ func TestExtractTestLevel(t *testing.T) {
 	defaultOpts := types.E2ETestOptions{
 		NeverSkipPrefixes: []string{"TestOdhOperator/DSCInitialization_and_DataScienceCluster_management_E2E_Tests"},
 		SkipAtPrefixes: []string{
+			"TestOdhOperator/Module_Focused_E2E_Tests/",
 			"TestOdhOperator/services/",
 			"TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/*/",
 			"TestOdhOperator/",
@@ -351,6 +352,13 @@ func TestExtractTestLevel(t *testing.T) {
 		wantLevel  string
 		shouldSkip bool
 	}{
+		{
+			name:       "focused module lifecycle is one retry unit",
+			opts:       defaultOpts,
+			testName:   "TestOdhOperator/Module_Focused_E2E_Tests/sparkoperator/Enable_selected_module",
+			wantLevel:  "TestOdhOperator/Module_Focused_E2E_Tests/sparkoperator",
+			shouldSkip: true,
+		},
 		{
 			name:       "dsc initialization test - should not skip",
 			opts:       defaultOpts,

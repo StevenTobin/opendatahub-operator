@@ -852,6 +852,15 @@ e2e-test:
 	fi; \
 	go run -C ./cmd/test-retry main.go e2e --verbose --working-dir=$(CURDIR) $(if $(JUNIT_OUTPUT_PATH),--junit-output=$(JUNIT_OUTPUT_PATH)) -- ${E2E_TEST_FLAGS}
 
+.PHONY: e2e-test-module
+e2e-test-module: ## Run the exclusive focused E2E lifecycle for one registered module (usage: make e2e-test-module MODULE=sparkoperator)
+ifeq ($(strip $(MODULE)),)
+	$(error MODULE is required. Example: make e2e-test-module MODULE=sparkoperator)
+endif
+	E2E_TEST_MODULE_CONFORMANCE=$(MODULE) \
+	E2E_TEST_FAIL_ON_MODULE_CONFORMANCE=true \
+	$(MAKE) e2e-test
+
 .PHONY: e2e-test-single
 e2e-test-single:
 # Run a single E2E test function (usage: make e2e-test-single TEST="<test-path>")

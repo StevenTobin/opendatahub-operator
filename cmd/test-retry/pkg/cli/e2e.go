@@ -77,8 +77,9 @@ Example: test-retry e2e -- -run TestFoo -v`,
 	cmd.Flags().IntVar(&maxRetries, "max-retries", 3, "Maximum number of retries for failed tests")
 	cmd.Flags().StringSliceVar(&neverSkip, "never-skip", []string{"TestOdhOperator/DSCInitialization_and_DataScienceCluster_management_E2E_Tests", "TestOdhOperator/DataScienceCluster"}, "Test prefixes that should never be skipped (always run, repeatable)")
 	cmd.Flags().StringSliceVar(&skipAtPrefix, "skip-at-prefix", []string{
-		"TestOdhOperator/monitoring/", // Extract monitoring tests at group level for efficient retry
-		"TestOdhOperator/services/*/", // Extract services at service level
+		"TestOdhOperator/monitoring/",                                                      // Extract monitoring tests at group level for efficient retry
+		"TestOdhOperator/services/*/",                                                      // Extract services at service level
+		"TestOdhOperator/Module_Focused_E2E_Tests/",                                        // Retry the complete focused lifecycle for one selected module.
 		"TestOdhOperator/Platform_Orchestration_E2E_Tests/DAG_Ordering_Upgrade_E2E_Tests/", // Extract the upgrade-ordering scenario as one retryable test.
 		// Extract platform contract tests at module level within each runlevel.
 		"TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/*/",

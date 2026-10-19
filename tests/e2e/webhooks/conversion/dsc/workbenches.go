@@ -26,7 +26,7 @@ func (m WorkbenchesSuite) v2ToV3(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				Workbenches: componentApi.DSCWorkbenches{
@@ -39,14 +39,14 @@ func (m WorkbenchesSuite) v2ToV3(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.workbenches.managementState == "Managed"`),
 		jq.Match(`.spec.components.workbenches.workbenchesV2.managementState == "Managed"`),
 		jq.Match(`.status.components.workbenches.managementState == "Managed"`),
 		jq.Match(`.status.components.workbenchesV2.managementState == "Managed"`),
 	))
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.workbenches.managementState == "Managed"`),
 		jq.Match(`.spec.components.workbenches.workbenchesV2.managementState == "Managed"`),
 		jq.Match(`.status.components.workbenches.managementState == "Managed"`),
@@ -59,7 +59,7 @@ func (m WorkbenchesSuite) v3ToV2(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscApi.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscApi.DataScienceClusterSpec{
 			Components: dscApi.Components{
 				Workbenches: componentApi.DSCWorkbenches{
@@ -72,14 +72,14 @@ func (m WorkbenchesSuite) v3ToV2(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.workbenches.managementState == "Managed"`),
 		jq.Match(`.spec.components.workbenches.workbenchesV2.managementState == "Managed"`),
 		jq.Match(`.status.components.workbenches.managementState == "Managed"`),
 		jq.Match(`.status.components.workbenchesV2.managementState == "Managed"`),
 	))
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.workbenches.managementState == "Managed"`),
 		jq.Match(`.spec.components.workbenches.workbenchesV2.managementState == "Managed"`),
 		jq.Match(`.status.components.workbenches.managementState == "Managed"`),

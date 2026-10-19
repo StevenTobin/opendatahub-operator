@@ -16,6 +16,7 @@ func TestE2EDefaultSkipAtPrefixes(t *testing.T) {
 	require.Equal(t, []string{
 		"TestOdhOperator/monitoring/",
 		"TestOdhOperator/services/*/",
+		"TestOdhOperator/Module_Focused_E2E_Tests/",
 		"TestOdhOperator/Platform_Orchestration_E2E_Tests/DAG_Ordering_Upgrade_E2E_Tests/",
 		"TestOdhOperator/Platform_Orchestration_E2E_Tests/Validate_runlevel_gating_and_convergence/*/",
 		"TestOdhOperator/",

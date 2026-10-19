@@ -29,7 +29,7 @@ func (m AIHubSuite) v2ToV3(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscv2.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscv2.DataScienceClusterSpec{
 			Components: dscv2.Components{
 				ModelRegistry: componentApi.DSCModelRegistry{
@@ -44,7 +44,7 @@ func (m AIHubSuite) v2ToV3(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.aiHub.managementState == "Managed"`),
 		jq.Match(`.spec.components.aiHub.instancesNamespace == "model-registries"`),
 		jq.Match(`.status.components.aiHub.managementState == "Managed"`),
@@ -52,7 +52,7 @@ func (m AIHubSuite) v2ToV3(t *testing.T) {
 		jq.Match(`(.status.components.aiHub | has("applicationNamespace")) == false`),
 	))
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.modelregistry.managementState == "Managed"`),
 		jq.Match(`.spec.components.modelregistry.registriesNamespace == "model-registries"`),
 		jq.Match(`.status.components.modelregistry.managementState == "Managed"`),
@@ -64,7 +64,7 @@ func (m AIHubSuite) v3ToV2(t *testing.T) {
 	w := m.newScenario(t)
 
 	w.Apply(&dscApi.DataScienceCluster{
-		ObjectMeta: metav1.ObjectMeta{Name: dscKey.Name},
+		ObjectMeta: metav1.ObjectMeta{Name: m.dscKey.Name},
 		Spec: dscApi.DataScienceClusterSpec{
 			Components: dscApi.Components{
 				AIHub: componentApi.DSCAIHub{
@@ -79,14 +79,14 @@ func (m AIHubSuite) v3ToV2(t *testing.T) {
 		},
 	}).Should(Succeed())
 
-	w.Get(gvk.DataScienceClusterV2, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV2, m.dscKey).Should(And(
 		jq.Match(`.spec.components.modelregistry.managementState == "Managed"`),
 		jq.Match(`.spec.components.modelregistry.registriesNamespace == "model-registries"`),
 		jq.Match(`.status.components.modelregistry.managementState == "Managed"`),
 		jq.Match(`.status.components.modelregistry.registriesNamespace == "model-registries"`),
 	))
 
-	w.Get(gvk.DataScienceClusterV3, dscKey).Should(And(
+	w.Get(gvk.DataScienceClusterV3, m.dscKey).Should(And(
 		jq.Match(`.spec.components.aiHub.managementState == "Managed"`),
 		jq.Match(`.spec.components.aiHub.instancesNamespace == "model-registries"`),
 		jq.Match(`.status.components.aiHub.managementState == "Managed"`),
