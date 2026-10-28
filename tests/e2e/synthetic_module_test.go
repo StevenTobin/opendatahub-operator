@@ -53,6 +53,7 @@ func syntheticModuleTestSuite(t *testing.T) {
 	controllerImage := os.Getenv(synthetice2e.ControllerImage)
 	require.NotEmpty(t, controllerImage, "%s must contain the digest-pinned synthetic module image", synthetice2e.ControllerImage)
 
+	envSnapshot := ctx.snapshotOperatorEnvVars(t, syntheticModuleEnableEnv, synthetice2e.ControllerImage)
 	ctx.setOperatorEnvVars(t,
 		corev1.EnvVar{Name: syntheticModuleEnableEnv, Value: "true"},
 		corev1.EnvVar{Name: synthetice2e.ControllerImage, Value: controllerImage},
@@ -66,7 +67,7 @@ func syntheticModuleTestSuite(t *testing.T) {
 			WithWaitForDeletion(true),
 		)
 		ensureSyntheticOperatorResourcesGone(t, tc)
-		ctx.removeOperatorEnvVars(t, syntheticModuleEnableEnv, synthetice2e.ControllerImage)
+		ctx.restoreOperatorEnvVars(t, envSnapshot)
 	})
 
 	RunTestCases(t, []TestCase{

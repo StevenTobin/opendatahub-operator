@@ -9,6 +9,7 @@ permissions:
 
 env:
   E2E_IMAGE_TAG_BASE: quay.io/${{ secrets.QUAY_ORG }}/opendatahub-operator-e2e
+  SYNTHETIC_MODULE_IMAGE_TAG_BASE: quay.io/${{ secrets.QUAY_ORG }}/opendatahub-synthetic-module
 
 jobs:
   build-push-e2e-image:
@@ -70,4 +71,17 @@ jobs:
           echo "Pushing E2E test image with commit reference: ${E2E_IMAGE_COMMIT}"
           podman push "${E2E_IMAGE_COMMIT}"
 
-          echo "E2E test image built and pushed successfully!"
+          SYNTHETIC_IMAGE="${SYNTHETIC_MODULE_IMAGE_TAG_BASE}:${{ steps.image-tag.outputs.E2E_IMAGE_TAG }}"
+          SYNTHETIC_IMAGE_COMMIT="${SYNTHETIC_MODULE_IMAGE_TAG_BASE}:${{ steps.image-tag.outputs.E2E_IMAGE_TAG_COMMIT }}"
+          SYNTHETIC_IMAGE_LATEST="${SYNTHETIC_MODULE_IMAGE_TAG_BASE}:latest"
+          echo "Building synthetic module images"
+          podman build \
+            --platform linux/amd64 \
+            -f tests/e2e/syntheticmodule/Dockerfile \
+            -t "${SYNTHETIC_IMAGE}" -t "${SYNTHETIC_IMAGE_COMMIT}" -t "${SYNTHETIC_IMAGE_LATEST}" \
+            .
+          podman push "${SYNTHETIC_IMAGE}"
+          podman push "${SYNTHETIC_IMAGE_COMMIT}"
+          podman push "${SYNTHETIC_IMAGE_LATEST}"
+
+          echo "E2E and synthetic module images built and pushed successfully!"

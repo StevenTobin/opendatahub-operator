@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -1230,6 +1231,71 @@ func (tc *DAGOrderingTestCtx) deleteDAGQuota() {
 		WithIgnoreNotFound(true),
 		WithWaitForDeletion(true),
 	)
+}
+
+type operatorEnvSnapshot struct {
+	values  []corev1.EnvVar
+	missing []string
+}
+
+func (tc *DAGOrderingTestCtx) snapshotOperatorEnvVars(t *testing.T, names ...string) operatorEnvSnapshot {
+	t.Helper()
+
+	wanted := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		wanted[name] = struct{}{}
+	}
+
+	var current []corev1.EnvVar
+	if sub := tc.findSubscription(t); sub != nil && sub.Spec.Config != nil {
+		current = sub.Spec.Config.Env
+	} else {
+		deployment := tc.FetchResource(WithMinimalObject(gvk.Deployment, tc.operatorDeploymentNN()))
+		containers, found, err := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "containers")
+		require.NoError(t, err)
+		require.True(t, found)
+		require.NotEmpty(t, containers)
+		containerMap, ok := containers[0].(map[string]any)
+		require.True(t, ok)
+		var container corev1.Container
+		require.NoError(t, runtime.DefaultUnstructuredConverter.FromUnstructured(containerMap, &container))
+		current = container.Env
+	}
+
+	snapshot := operatorEnvSnapshot{}
+	for _, env := range current {
+		if _, found := wanted[env.Name]; !found {
+			continue
+		}
+		snapshot.values = append(snapshot.values, env)
+		delete(wanted, env.Name)
+	}
+	for _, name := range names {
+		if _, found := wanted[name]; found {
+			snapshot.missing = append(snapshot.missing, name)
+		}
+	}
+	return snapshot
+}
+
+func (tc *DAGOrderingTestCtx) restoreOperatorEnvVars(t *testing.T, snapshot operatorEnvSnapshot) {
+	t.Helper()
+
+	if sub := tc.findSubscription(t); sub != nil {
+		if sub.Spec.Config == nil {
+			sub.Spec.Config = &ofapi.SubscriptionConfig{}
+		}
+		names := append(envVarNames(snapshot.values), snapshot.missing...)
+		sub.Spec.Config.Env = slices.DeleteFunc(sub.Spec.Config.Env, func(env corev1.EnvVar) bool {
+			return slices.Contains(names, env.Name)
+		})
+		sub.Spec.Config.Env = append(sub.Spec.Config.Env, snapshot.values...)
+		require.NoError(t, tc.Client().Update(tc.Context(), sub), "Failed to restore Subscription %s environment", sub.Name)
+	} else {
+		tc.patchDeploymentEnvVars(t, snapshot.values, snapshot.missing)
+	}
+
+	tc.waitForOperatorReady(t)
 }
 
 // setOperatorEnvVars sets environment variables on the operator, triggering

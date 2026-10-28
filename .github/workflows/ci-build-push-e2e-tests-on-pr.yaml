@@ -8,12 +8,15 @@ on:
       - 'tests/e2e/**'
       - 'cmd/main.go'
       - 'Dockerfiles/e2e-tests/e2e-tests.Dockerfile'
+      - 'internal/controller/modules/**'
+      - 'api/config/**'
 
 permissions:
   contents: read
 
 env:
   E2E_BASE_IMAGE: quay.io/${{ secrets.QUAY_ORG }}/opendatahub-operator-e2e
+  SYNTHETIC_MODULE_BASE_IMAGE: quay.io/${{ secrets.QUAY_ORG }}/opendatahub-synthetic-module
   E2E_PR_IMAGE_TAG: pr-${{ github.event.number }}
 
 jobs:
@@ -66,4 +69,14 @@ jobs:
           echo "Pushing E2E test image: ${E2E_IMAGE}"
           podman push "${E2E_IMAGE}"
 
-          echo "E2E test image built and pushed successfully!"
+          SYNTHETIC_MODULE_IMAGE="${SYNTHETIC_MODULE_BASE_IMAGE}:${E2E_PR_IMAGE_TAG}"
+          echo "Building synthetic module image: ${SYNTHETIC_MODULE_IMAGE}"
+          podman build \
+            --platform linux/amd64 \
+            -f tests/e2e/syntheticmodule/Dockerfile \
+            -t "${SYNTHETIC_MODULE_IMAGE}" \
+            .
+          podman push "${SYNTHETIC_MODULE_IMAGE}"
+
+          echo "E2E and synthetic module images built and pushed successfully!"
+          echo "RELATED_IMAGE_ODH_SYNTHETIC_MODULE_OPERATOR_IMAGE=${SYNTHETIC_MODULE_IMAGE}" >> "${GITHUB_STEP_SUMMARY}"

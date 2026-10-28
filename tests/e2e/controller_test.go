@@ -39,6 +39,15 @@ import (
 // Test function signature.
 type TestFn func(t *testing.T)
 
+type TestProfile string
+
+const (
+	ProfileFull      TestProfile = "full"
+	ProfileCore      TestProfile = "core"
+	ProfileSynthetic TestProfile = "synthetic"
+	ProfileDAG       TestProfile = "dag"
+)
+
 // DeletionPolicy type representing the deletion policy.
 type DeletionPolicy int
 
@@ -75,6 +84,7 @@ func ParseDeletionPolicy(dp string) (DeletionPolicy, error) {
 
 // Struct to store test configurations.
 type TestContextConfig struct {
+	profile              TestProfile
 	tag                  string
 	operatorNamespace    string
 	appsNamespace        string
@@ -95,6 +105,7 @@ type TestContextConfig struct {
 	conversionWebhookDSC             bool
 	conversionWebhookPlatform        bool
 	dagOrderingTest                  bool
+	syntheticModuleTest              bool
 	v2tov3upgradeTest                bool
 	circuitBreakerEnabled            bool
 	circuitBreakerThreshold          int
@@ -486,7 +497,9 @@ func TestOdhOperator(t *testing.T) {
 	}
 
 	// Validate operator-owned module lifecycle against the known-good fixture.
-	mustRun(t, "Synthetic Module E2E Tests", syntheticModuleTestSuite)
+	if testOpts.syntheticModuleTest {
+		mustRun(t, "Synthetic Module E2E Tests", syntheticModuleTestSuite)
+	}
 
 	// Run full production-module DAG integration on a clean DSC.
 	if testOpts.dagOrderingTest {
@@ -547,6 +560,52 @@ func TestOdhOperator(t *testing.T) {
 	}
 }
 
+func applyTestProfile(profile TestProfile) error {
+	testOpts.profile = profile
+
+	switch profile {
+	case ProfileFull:
+		return nil
+	case ProfileCore:
+		testOpts.dagOrderingTest = false
+		// DSC conversion scenarios delete the singleton DSC. Keep Platform
+		// conversion coverage in core while preserving the baseline for DAG.
+		testOpts.conversionWebhookDSC = false
+		return nil
+	case ProfileSynthetic:
+		testOpts.dependantOperatorsManagementTest = false
+		testOpts.dscManagementTest = false
+		testOpts.dscValidationTest = false
+		testOpts.operatorControllerTest = false
+		testOpts.operatorResilienceTest = false
+		testOpts.webhookTest = false
+		testOpts.conversionWebhookTest = false
+		testOpts.conversionWebhookDSC = false
+		testOpts.conversionWebhookPlatform = false
+		testOpts.dagOrderingTest = false
+		testOpts.v2tov3upgradeTest = false
+		Services.enabled = false
+		return nil
+	case ProfileDAG:
+		testOpts.dependantOperatorsManagementTest = false
+		testOpts.dscManagementTest = false
+		testOpts.dscValidationTest = false
+		testOpts.operatorControllerTest = false
+		testOpts.operatorResilienceTest = false
+		testOpts.webhookTest = false
+		testOpts.conversionWebhookTest = false
+		testOpts.conversionWebhookDSC = false
+		testOpts.conversionWebhookPlatform = false
+		testOpts.syntheticModuleTest = false
+		testOpts.v2tov3upgradeTest = false
+		testOpts.cleanUpPreviousResources = false
+		Services.enabled = false
+		return nil
+	default:
+		return fmt.Errorf("unknown E2E test profile %q; valid profiles are: %s, %s, %s, %s", profile, ProfileCore, ProfileSynthetic, ProfileDAG, ProfileFull)
+	}
+}
+
 func TestMain(m *testing.M) {
 	// Gomega output config:
 	format.MaxLength = 0 // 0 disables truncation entirely
@@ -579,6 +638,8 @@ func TestMain(m *testing.M) {
 	viper.SetDefault("operandReadinessTimeout", "2m")   // Operand deployments reaching ready state (P99=56s, outliers at 90s).
 
 	// Flags
+	pflag.String("test-profile", string(ProfileFull), "E2E execution profile: core, synthetic, dag, or full")
+	checkEnvVarBindingError(viper.BindEnv("test-profile", viper.GetEnvPrefix()+"_PROFILE"))
 	pflag.String("operator-namespace", "opendatahub-operator-system", "Namespace where the odh operator is deployed")
 	checkEnvVarBindingError(viper.BindEnv("operator-namespace", viper.GetEnvPrefix()+"_OPERATOR_NAMESPACE"))
 	pflag.String("applications-namespace", "opendatahub", "Namespace where the odh applications are deployed")
@@ -626,6 +687,8 @@ func TestMain(m *testing.M) {
 	checkEnvVarBindingError(viper.BindEnv("test-conversion-webhook-platform", viper.GetEnvPrefix()+"_CONVERSION_WEBHOOK_PLATFORM"))
 	pflag.Bool("test-dag-ordering", true, "run DAG upgrade ordering tests")
 	checkEnvVarBindingError(viper.BindEnv("test-dag-ordering", viper.GetEnvPrefix()+"_DAG_ORDERING"))
+	pflag.Bool("test-synthetic-module", true, "run the synthetic module platform contract")
+	checkEnvVarBindingError(viper.BindEnv("test-synthetic-module", viper.GetEnvPrefix()+"_SYNTHETIC_MODULE"))
 
 	pflag.Bool("circuit-breaker", true, "enable circuit breaker to halt tests on infrastructure failures")
 	checkEnvVarBindingError(viper.BindEnv("circuit-breaker", viper.GetEnvPrefix()+"_CIRCUIT_BREAKER"))
@@ -704,12 +767,18 @@ func TestMain(m *testing.M) {
 	testOpts.conversionWebhookDSC = viper.GetBool("test-conversion-webhook-dsc")
 	testOpts.conversionWebhookPlatform = viper.GetBool("test-conversion-webhook-platform")
 	testOpts.dagOrderingTest = viper.GetBool("test-dag-ordering")
+	testOpts.syntheticModuleTest = viper.GetBool("test-synthetic-module")
 	testOpts.circuitBreakerEnabled = viper.GetBool("circuit-breaker")
 	testOpts.circuitBreakerThreshold = viper.GetInt("circuit-breaker-threshold")
 
 	Services.enabled = viper.GetBool("test-services")
 	Services.flags = viper.GetStringSlice("test-service")
 	Services.parallel = viper.GetBool("test-services-parallel")
+
+	if err := applyTestProfile(TestProfile(viper.GetString("test-profile"))); err != nil {
+		fmt.Println(err.Error())
+		os.Exit(1)
+	}
 
 	// Config validation
 	if err := Services.Validate(); err != nil {

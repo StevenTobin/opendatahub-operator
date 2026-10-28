@@ -814,14 +814,47 @@ ifneq (,$(wildcard cmd/mcp-server/Makefile))
 include cmd/mcp-server/Makefile
 endif
 
-.PHONY: e2e-test e2e
+.PHONY: e2e-test e2e-test-core e2e-test-dag e2e-test-run e2e
 e2e: e2e-test ## Alias for e2e-test
+
+E2E_DAG_REPORT_PATH ?= $(if $(ARTIFACT_DIR),$(ARTIFACT_DIR)/dag-report.json,)
+E2E_SUMMARY_PATH ?= $(if $(ARTIFACT_DIR),$(ARTIFACT_DIR)/e2e-summary.json,)
+
+# The default E2E entrypoint runs operator-owned coverage and the production
+# module DAG as separate invocations. Failed DAG runs are non-blocking only
+# when an explicit report attributes every failure to module configuration.
+e2e-test:
+	@set +e; \
+	$(MAKE) e2e-test-core; core_status=$$?; \
+	if [ $$core_status -ne 0 ]; then \
+		go run ./cmd/e2e-verdict --core-exit=$$core_status --dag-exit=-1 $(if $(E2E_SUMMARY_PATH),--output=$(E2E_SUMMARY_PATH)) || true; \
+		exit $$core_status; \
+	fi; \
+	$(MAKE) e2e-test-dag; dag_status=$$?; \
+	verdict_status=0; \
+	go run ./cmd/e2e-verdict --core-exit=0 --dag-exit=$$dag_status $(if $(E2E_DAG_REPORT_PATH),--dag-report=$(E2E_DAG_REPORT_PATH)) $(if $(E2E_SUMMARY_PATH),--output=$(E2E_SUMMARY_PATH)) || verdict_status=$$?; \
+	exit $$verdict_status
+
+# Core leaves DSC/DSCI in place for the following DAG invocation.
+e2e-test-core:
+	@$(MAKE) e2e-test-run \
+		-e E2E_TEST_PROFILE=core \
+		-e E2E_TEST_DELETION_POLICY=never \
+		$(if $(ARTIFACT_DIR),-e JUNIT_OUTPUT_PATH=$(ARTIFACT_DIR)/junit-core.xml)
+
+# DAG consumes the baseline established by core and owns module cleanup.
+e2e-test-dag:
+	@$(MAKE) e2e-test-run \
+		-e E2E_TEST_PROFILE=dag \
+		-e E2E_TEST_CLEAN_UP_PREVIOUS_RESOURCES=false \
+		-e E2E_TEST_DELETION_POLICY=never \
+		$(if $(ARTIFACT_DIR),-e JUNIT_OUTPUT_PATH=$(ARTIFACT_DIR)/junit-dag.xml)
 # Path-based e2e test scoping (cmd/manifest-tools' resolve-e2e-scope subcommand)
 # runs and logs its service decision whenever E2E_TEST_SERVICE is unset. Only
 # when E2E_AUTO_RESOLVE=true does it narrow what actually runs; otherwise it only logs.
 export E2E_AUTO_RESOLVE
 E2E_AUTO_RESOLVE ?= false
-e2e-test:
+e2e-test-run:
 # Specifies the namespace where the operator pods are deployed
 ifndef E2E_TEST_OPERATOR_NAMESPACE
 export E2E_TEST_OPERATOR_NAMESPACE = $(OPERATOR_NAMESPACE)
@@ -844,9 +877,9 @@ endif
 # Auto-apply digest-pinned image overrides to the OLM Subscription before E2E tests.
 # Set SKIP_IMAGE_OVERRIDES=1 to disable.
 ifndef SKIP_IMAGE_OVERRIDES
-e2e-test: apply-image-overrides-olm
+e2e-test-run: apply-image-overrides-olm
 endif
-e2e-test:
+e2e-test-run:
 	@if [ -z "$${E2E_TEST_SERVICE:-}" ]; then \
 		if resolved=$$(go run -C ./cmd/manifest-tools main.go --config $(CURDIR)/manifests-config.yaml resolve-e2e-scope) \
 			&& echo "$$resolved" | grep -q '^COMPONENTS=' \
@@ -879,8 +912,9 @@ e2e-setup-cluster:
 # Setup cluster prerequisites (DSCI/DSC) by running e2e-test with most suites disabled
 # (operator-controller tests may still execute unless explicitly disabled)
 	@echo "Creating DSCI and DSC with all services enabled..."
-	@$(MAKE) e2e-test \
-
+	@$(MAKE) e2e-test-run \
+		-e E2E_TEST_PROFILE=core \
+		-e E2E_TEST_SYNTHETIC_MODULE=false \
 		-e E2E_TEST_SERVICES=false \
 		-e E2E_TEST_WEBHOOK=false \
 		-e E2E_TEST_CONVERSION_WEBHOOK=false \
@@ -891,7 +925,8 @@ e2e-setup-cluster:
 
 .PHONY: e2e-test-xks
 e2e-test-xks: ## Run e2e tests on external Kubernetes (KinD, AKS, CoreWeave, etc.). Image overrides are applied at deploy (see deploy-rhaii-local).
-	@$(MAKE) e2e-test \
+	@$(MAKE) e2e-test-run \
+		-e E2E_TEST_PROFILE=full \
 		-e E2E_TEST_CLEAN_UP_PREVIOUS_RESOURCES=false \
 		-e E2E_TEST_DEPENDANT_OPERATORS_MANAGEMENT=false \
 		-e E2E_TEST_WEBHOOK=false \
