@@ -139,58 +139,6 @@ var (
 	Scheme   = runtime.NewScheme()
 	testOpts = TestContextConfig{}
 
-	Components = TestGroup{
-		name:     "components",
-		enabled:  true,
-		parallel: true,
-		scenarios: []map[string]TestFn{
-			{
-				componentApi.DashboardComponentName:            dashboardTestSuite,
-				componentApi.RayComponentName:                  rayTestSuite,
-				componentApi.TrainerComponentName:              trainerTestSuite,
-				componentApi.AIPipelinesComponentName:          aiPipelinesTestSuite,
-				componentApi.WorkbenchesComponentName:          workbenchesTestSuite,
-				componentApi.KserveComponentName:               kserveTestSuite,
-				componentApi.OGXComponentName:                  ogxTestSuite,
-				componentApi.SparkOperatorComponentName:        sparkOperatorTestSuite,
-				componentApi.AIGatewayComponentName:            aiGatewayTestSuite,
-				componentApi.MCPLifecycleOperatorComponentName: mcpLifecycleOperatorTestSuite,
-				componentApi.DatabaseServiceComponentName:      databaseServiceTestSuite,
-			},
-			{
-				// Dashboard and Data mutate the singleton DSC's data lifecycle fields.
-				// Keep Data in a later scenario group so their cleanups cannot race.
-				componentApi.DataModuleName: dataModuleTestSuite,
-				// Kserve propagates AIHub state to the module CR, so it needs to manipulate the DSC's AIHub state to test.
-				// This triggers Dashboard AIHub state propagation, interfering with Dashboard tests by deploying model registry UI resources
-				// Keep it in a later scenario so it does not race with Dashboard tests.
-				componentApi.KserveComponentName: kserveAIHubStatePropagationTestSuite,
-			},
-			{
-				// Kueue tests depends on Workbenches, so must not run with Workbenches tests in parallel
-				componentApi.KueueComponentName: kueueTestSuite,
-				// AIHub and Kserve are coupled, so must not run with Kserve tests in parallel
-				componentApi.AIHubModuleName: aihubTestSuite,
-			},
-			{
-				// TrustyAI tests depends on KServe, so must not run with Kserve tests in parallel
-				componentApi.TrustyAIComponentName: trustyAITestSuite,
-				// MLflowOperator tests should not run in parallel with Workbenches tests, as Workbenches tests integration with MLflowOperator
-				componentApi.MLflowOperatorComponentName: mlflowOperatorTestSuite,
-			},
-			{
-				// run external operator degraded monitoring tests isolated from other component tests
-				componentApi.KserveComponentName:  kserveDegradedMonitoringTestSuite,
-				componentApi.KueueComponentName:   kueueDegradedMonitoringTestSuite,
-				componentApi.TrainerComponentName: trainerDegradedMonitoringTestSuite,
-			},
-			{
-				// ModelCache tests modify namespace PSA labels, so must not run with other KServe tests in parallel
-				componentApi.KserveComponentName + "-modelcache": kserveModelCacheTestSuite,
-			},
-		},
-	}
-
 	Services = TestGroup{
 		name:     "services",
 		enabled:  true,
@@ -537,17 +485,16 @@ func TestOdhOperator(t *testing.T) {
 		mustRun(t, "DSCInitialization and DataScienceCluster validation E2E Tests", dscValidationTestSuite)
 	}
 
-	// Run DAG ordering tests before individual component tests to verify
-	// the unified batch provisioning order on a clean DSC.
+	// Validate operator-owned module lifecycle against the known-good fixture.
+	mustRun(t, "Synthetic Module E2E Tests", syntheticModuleTestSuite)
+
+	// Run full production-module DAG integration on a clean DSC.
 	if testOpts.dagOrderingTest {
 		mustRun(t, "DAG Ordering E2E Tests", dagOrderingTestSuite)
 	}
 
 	// Run monitoring before components — monitoring setup is a prerequisite.
 	mustRun(t, serviceApi.MonitoringServiceName, Services.RunSingle(serviceApi.MonitoringServiceName))
-
-	// Run components test suites
-	mustRun(t, Components.String(), Components.Run)
 
 	// Run remaining services (auth, gateway)
 	mustRun(t, Services.String(), Services.RunExcluding(serviceApi.MonitoringServiceName))
@@ -685,15 +632,6 @@ func TestMain(m *testing.M) {
 	pflag.Int("circuit-breaker-threshold", 3, "consecutive test failures before health-checking for infrastructure problems")
 	checkEnvVarBindingError(viper.BindEnv("circuit-breaker-threshold", viper.GetEnvPrefix()+"_CIRCUIT_BREAKER_THRESHOLD"))
 
-	// Component flags
-	componentNames := strings.Join(Components.Names(), ", ")
-	pflag.Bool("test-components", Components.enabled, "Enable testing of individual components specified by --test-component flag")
-	checkEnvVarBindingError(viper.BindEnv("test-components", viper.GetEnvPrefix()+"_COMPONENTS"))
-	pflag.StringSlice("test-component", Components.Names(), "Run tests for the specified component. Valid names: "+componentNames)
-	checkEnvVarBindingError(viper.BindEnv("test-component", viper.GetEnvPrefix()+"_COMPONENT"))
-	pflag.Bool("test-components-parallel", Components.parallel, "Run component test suites in parallel")
-	checkEnvVarBindingError(viper.BindEnv("test-components-parallel", viper.GetEnvPrefix()+"_COMPONENTS_PARALLEL"))
-
 	// Service flags
 	serviceNames := strings.Join(Services.Names(), ", ")
 	pflag.Bool("test-services", Services.enabled, "Enable testing of individual services specified by --test-service flag")
@@ -769,19 +707,11 @@ func TestMain(m *testing.M) {
 	testOpts.circuitBreakerEnabled = viper.GetBool("circuit-breaker")
 	testOpts.circuitBreakerThreshold = viper.GetInt("circuit-breaker-threshold")
 
-	Components.enabled = viper.GetBool("test-components")
-	Components.flags = viper.GetStringSlice("test-component")
-	Components.parallel = viper.GetBool("test-components-parallel")
 	Services.enabled = viper.GetBool("test-services")
 	Services.flags = viper.GetStringSlice("test-service")
 	Services.parallel = viper.GetBool("test-services-parallel")
 
 	// Config validation
-	if err := Components.Validate(); err != nil {
-		fmt.Printf("test-component: %s", err.Error())
-		os.Exit(1)
-	}
-
 	if err := Services.Validate(); err != nil {
 		fmt.Printf("test-service: %s", err.Error())
 		os.Exit(1)

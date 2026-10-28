@@ -111,6 +111,10 @@ type PlatformModules struct {
 	// DatabaseService controls the shared database module operator lifecycle.
 	// +optional
 	DatabaseService common.ManagementSpec `json:"databaseservice,omitempty"`
+
+	// SyntheticE2E controls the private synthetic E2E module lifecycle.
+	// +optional
+	SyntheticE2E common.ManagementSpec `json:"synthetice2e,omitempty"`
 }
 
 // PlatformStatus defines the observed state of Platform.

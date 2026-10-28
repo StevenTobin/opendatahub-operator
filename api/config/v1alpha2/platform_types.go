@@ -109,6 +109,10 @@ type PlatformModules struct {
 	// AIHub controls the AI Hub module operator lifecycle.
 	// +optional
 	AIHub common.ManagementSpec `json:"aihub,omitempty"`
+
+	// SyntheticE2E controls the private synthetic E2E module lifecycle.
+	// +optional
+	SyntheticE2E common.ManagementSpec `json:"synthetice2e,omitempty"`
 }
 
 // PlatformStatus defines the observed state of Platform.

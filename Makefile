@@ -447,6 +447,12 @@ run-nowebhook: manifests generate fmt vet ## Run a controller from your host wit
 image-build: # unit-test ## Build image with the manager.
 	$(IMAGE_BUILDER) buildx build --no-cache -f Dockerfiles/$(DOCKERFILE_FILENAME) ${IMAGE_BUILD_FLAGS} -t $(IMG) .
 
+SYNTHETIC_MODULE_IMG ?= synthetic-module-operator:latest
+
+.PHONY: synthetic-module-image-build
+synthetic-module-image-build: ## Build the standalone synthetic module image used by core E2E tests.
+	$(IMAGE_BUILDER) buildx build --no-cache -f tests/e2e/syntheticmodule/Dockerfile ${IMAGE_BUILD_FLAGS} -t $(SYNTHETIC_MODULE_IMG) .
+
 .PHONY: image-push
 image-push: ## Push image with the manager.
 	$(IMAGE_BUILDER) push $(IMG)
@@ -811,9 +817,8 @@ endif
 .PHONY: e2e-test e2e
 e2e: e2e-test ## Alias for e2e-test
 # Path-based e2e test scoping (cmd/manifest-tools' resolve-e2e-scope subcommand)
-# runs and logs its decision whenever E2E_TEST_COMPONENT and E2E_TEST_SERVICE are
-# both unset (e.g. not already set explicitly by e2e-test-xks). Only when
-# E2E_AUTO_RESOLVE=true does it narrow what actually runs; otherwise it only logs.
+# runs and logs its service decision whenever E2E_TEST_SERVICE is unset. Only
+# when E2E_AUTO_RESOLVE=true does it narrow what actually runs; otherwise it only logs.
 export E2E_AUTO_RESOLVE
 E2E_AUTO_RESOLVE ?= false
 e2e-test:
@@ -842,22 +847,20 @@ ifndef SKIP_IMAGE_OVERRIDES
 e2e-test: apply-image-overrides-olm
 endif
 e2e-test:
-	@if [ -z "$${E2E_TEST_COMPONENT:-}" ] && [ -z "$${E2E_TEST_SERVICE:-}" ]; then \
+	@if [ -z "$${E2E_TEST_SERVICE:-}" ]; then \
 		if resolved=$$(go run -C ./cmd/manifest-tools main.go --config $(CURDIR)/manifests-config.yaml resolve-e2e-scope) \
 			&& echo "$$resolved" | grep -q '^COMPONENTS=' \
 			&& echo "$$resolved" | grep -q '^SERVICES='; then \
-			components=$$(echo "$$resolved" | grep '^COMPONENTS=' | cut -d= -f2); \
 			services=$$(echo "$$resolved" | grep '^SERVICES=' | cut -d= -f2); \
-			echo "SELECTIVE-E2E: would run components=[$$components] services=[$$services]"; \
+			echo "SELECTIVE-E2E: would run services=[$$services]"; \
 			if [ "$${E2E_AUTO_RESOLVE:-false}" = "true" ]; then \
-				if [ -n "$$components" ]; then export E2E_TEST_COMPONENT="$$components"; else export E2E_TEST_COMPONENTS=false; fi; \
 				if [ -n "$$services" ]; then export E2E_TEST_SERVICE="$$services"; else export E2E_TEST_SERVICES=false; fi; \
 				echo "SELECTIVE-E2E: E2E_AUTO_RESOLVE=true -- applying selective scope"; \
 			else \
 				echo "SELECTIVE-E2E: E2E_AUTO_RESOLVE is not 'true' -- running full suite (dry-run only)"; \
 			fi; \
 		else \
-			echo "SELECTIVE-E2E: could not resolve affected components -- running full suite"; \
+			echo "SELECTIVE-E2E: could not resolve affected services -- running full suite"; \
 		fi; \
 	fi; \
 	go run -C ./cmd/test-retry main.go e2e --verbose --max-retries=$(E2E_TESTING_MAX_RETRIES) --working-dir=$(CURDIR) $(if $(JUNIT_OUTPUT_PATH),--junit-output=$(JUNIT_OUTPUT_PATH)) -- ${E2E_TEST_FLAGS}
@@ -866,7 +869,7 @@ e2e-test:
 e2e-test-single:
 # Run a single E2E test function (usage: make e2e-test-single TEST="<test-path>")
 ifndef TEST
-	$(error TEST is required. Usage: make e2e-test-single TEST="TestOdhOperator/Component_Tests/dashboard/Validate component enabled")
+	$(error TEST is required. Usage: make e2e-test-single TEST="TestOdhOperator/Synthetic_Module_E2E_Tests/Validate_synthetic_module_contract")
 endif
 	@echo "Running single test: $(TEST)"
 	E2E_TEST_DELETION_POLICY=never E2E_TEST_CLEAN_UP_PREVIOUS_RESOURCES=false go test ./tests/e2e/ -run "$(TEST)" -timeout=10m -v
@@ -877,7 +880,7 @@ e2e-setup-cluster:
 # (operator-controller tests may still execute unless explicitly disabled)
 	@echo "Creating DSCI and DSC with all services enabled..."
 	@$(MAKE) e2e-test \
-		-e E2E_TEST_COMPONENTS=false \
+
 		-e E2E_TEST_SERVICES=false \
 		-e E2E_TEST_WEBHOOK=false \
 		-e E2E_TEST_CONVERSION_WEBHOOK=false \
@@ -893,8 +896,7 @@ e2e-test-xks: ## Run e2e tests on external Kubernetes (KinD, AKS, CoreWeave, etc
 		-e E2E_TEST_DEPENDANT_OPERATORS_MANAGEMENT=false \
 		-e E2E_TEST_WEBHOOK=false \
 		-e E2E_TEST_CONVERSION_WEBHOOK=false \
-		-e E2E_TEST_COMPONENTS=true \
-		-e E2E_TEST_COMPONENT="kserve" \
+
 		-e E2E_TEST_SERVICES=true \
 		-e E2E_TEST_SERVICE="gateway" \
 		-e E2E_TEST_OPERATOR_RESILIENCE=false \
