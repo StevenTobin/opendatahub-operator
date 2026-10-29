@@ -342,7 +342,7 @@ func (tc *DAGOrderingTestCtx) runOpenShiftTestCases(t *testing.T) {
 			// Capture diagnostics before the normal cleanup tears down module
 			// Deployments and their failing Pods/events.
 			runDiagnosticsAndClassify("DAG Ordering E2E Tests")
-			writeDAGClassificationReport(t)
+			writeDAGClassificationReport(t, tc)
 		}
 	})
 
@@ -1520,6 +1520,7 @@ func (tc *DAGOrderingTestCtx) operatorDeploymentName() string {
 
 type dagFailureEvidence struct {
 	Module                 string `json:"module,omitempty"`
+	PossibleModuleFailure  bool   `json:"possibleModuleFailure,omitempty"`
 	Domain                 string `json:"domain"`
 	Stage                  string `json:"stage,omitempty"`
 	LastSuccessfulBoundary string `json:"lastSuccessfulBoundary,omitempty"`
@@ -1530,7 +1531,7 @@ type dagFailureEvidenceReport struct {
 	Failures []dagFailureEvidence `json:"failures"`
 }
 
-func writeDAGClassificationReport(t *testing.T) {
+func writeDAGClassificationReport(t *testing.T, tc *DAGOrderingTestCtx) {
 	t.Helper()
 	path := os.Getenv("E2E_DAG_REPORT_PATH")
 	classification := lastClassification.Load()
@@ -1553,6 +1554,14 @@ func writeDAGClassificationReport(t *testing.T) {
 	if classification.Category == "infrastructure" {
 		domain = "test-infrastructure"
 	}
+	possibleModule := onlyUnhealthyManagedModule(tc)
+	if possibleModule != "" {
+		if module == "" {
+			module = possibleModule
+		}
+		message += fmt.Sprintf("; possible module failure: only unhealthy managed module is %s", possibleModule)
+	}
+
 	if classification.Subcategory == "image-pull" {
 		module = moduleWithImagePullFailure()
 		if module != "" {
@@ -1569,6 +1578,7 @@ func writeDAGClassificationReport(t *testing.T) {
 		Domain:                 domain,
 		Stage:                  stage,
 		LastSuccessfulBoundary: boundary,
+		PossibleModuleFailure:  possibleModule != "",
 		Message:                message,
 	}}}
 	data, err := json.MarshalIndent(report, "", "  ")
@@ -1576,6 +1586,56 @@ func writeDAGClassificationReport(t *testing.T) {
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o750), "create DAG report directory")                //nolint:gosec
 	require.NoError(t, os.WriteFile(path, append(data, '\n'), 0o600), "write classified DAG failure report") //nolint:gosec
 	t.Logf("Wrote classified DAG failure report to %s", path)
+}
+
+func onlyUnhealthyManagedModule(tc *DAGOrderingTestCtx) string {
+	platform := &unstructured.Unstructured{}
+	platform.SetGroupVersionKind(gvk.Platform)
+	if err := tc.Client().Get(tc.Context(), tc.PlatformNamespacedName, platform); err != nil {
+		return ""
+	}
+
+	managed := 0
+	unhealthy := ""
+	for _, registration := range modulebuiltin.Registrations() {
+		handler := registration.Handler
+		state, _, _ := unstructured.NestedString(platform.Object, "spec", "modules", handler.GetName(), "managementState")
+		if state != string(operatorv1.Managed) {
+			continue
+		}
+		managed++
+
+		list := &unstructured.UnstructuredList{}
+		list.SetGroupVersionKind(handler.GetGVK().GroupVersion().WithKind(handler.GetGVK().Kind + "List"))
+		if err := tc.Client().List(tc.Context(), list); err != nil || len(list.Items) == 0 {
+			unhealthy = handler.GetName()
+			continue
+		}
+		moduleCR := &list.Items[0]
+		if moduleConditionStatus(moduleCR, status.ConditionTypeReady) != string(metav1.ConditionTrue) ||
+			moduleConditionStatus(moduleCR, status.ConditionTypeDegraded) == string(metav1.ConditionTrue) {
+			unhealthy = handler.GetName()
+		}
+	}
+	if managed > 0 && unhealthy != "" {
+		// Only return a candidate when the other managed modules are healthy.
+		for _, registration := range modulebuiltin.Registrations() {
+			handler := registration.Handler
+			state, _, _ := unstructured.NestedString(platform.Object, "spec", "modules", handler.GetName(), "managementState")
+			if state != string(operatorv1.Managed) || handler.GetName() == unhealthy {
+				continue
+			}
+			list := &unstructured.UnstructuredList{}
+			list.SetGroupVersionKind(handler.GetGVK().GroupVersion().WithKind(handler.GetGVK().Kind + "List"))
+			if err := tc.Client().List(tc.Context(), list); err != nil || len(list.Items) == 0 ||
+				moduleConditionStatus(&list.Items[0], status.ConditionTypeReady) != string(metav1.ConditionTrue) ||
+				moduleConditionStatus(&list.Items[0], status.ConditionTypeDegraded) == string(metav1.ConditionTrue) {
+				return ""
+			}
+		}
+		return unhealthy
+	}
+	return ""
 }
 
 func moduleWithImagePullFailure() string {
