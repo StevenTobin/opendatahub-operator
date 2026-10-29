@@ -1,8 +1,11 @@
 package e2e_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -25,6 +28,8 @@ import (
 	componentApi "github.com/opendatahub-io/opendatahub-operator/v2/api/components/v1alpha1"
 	dscApi "github.com/opendatahub-io/opendatahub-operator/v2/api/datasciencecluster/v3"
 	serviceApi "github.com/opendatahub-io/opendatahub-operator/v2/api/services/v1alpha1"
+	modulecontroller "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules"
+	modulebuiltin "github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/modules/builtin"
 	"github.com/opendatahub-io/opendatahub-operator/v2/internal/controller/status"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster"
 	"github.com/opendatahub-io/opendatahub-operator/v2/pkg/cluster/gvk"
@@ -329,6 +334,16 @@ func (tc *DAGOrderingTestCtx) runOpenShiftTestCases(t *testing.T) {
 		tc.setAllRemoved(t)
 		tc.deleteDAGQuota()
 		tc.removeOperatorEnvVars(t, "RHAI_VERSION", "CI")
+	})
+	// Registered after destructive cleanup so LIFO cleanup ordering captures
+	// failure evidence while module CRs and status are still present.
+	t.Cleanup(func() {
+		if t.Failed() {
+			// Capture diagnostics before the normal cleanup tears down module
+			// Deployments and their failing Pods/events.
+			runDiagnosticsAndClassify("DAG Ordering E2E Tests")
+			writeDAGClassificationReport(t)
+		}
 	})
 
 	// Tests are ordered to minimise expensive enable/disable cycles.
@@ -1501,6 +1516,148 @@ func (tc *DAGOrderingTestCtx) operatorDeploymentName() string {
 		return controllerDeploymentRhoai
 	}
 	return controllerDeploymentODH
+}
+
+type dagFailureEvidence struct {
+	Module                 string `json:"module,omitempty"`
+	Domain                 string `json:"domain"`
+	Stage                  string `json:"stage,omitempty"`
+	LastSuccessfulBoundary string `json:"lastSuccessfulBoundary,omitempty"`
+	Message                string `json:"message,omitempty"`
+}
+
+type dagFailureEvidenceReport struct {
+	Failures []dagFailureEvidence `json:"failures"`
+}
+
+func writeDAGClassificationReport(t *testing.T) {
+	t.Helper()
+	path := os.Getenv("E2E_DAG_REPORT_PATH")
+	classification := lastClassification.Load()
+	if path == "" || classification == nil {
+		return
+	}
+
+	domain := "unknown"
+	module := ""
+	stage := "diagnostics"
+	boundary := "cluster diagnostics collected"
+	message := fmt.Sprintf(
+		"%s: %s (code=%d confidence=%s)",
+		classification.Subcategory,
+		strings.Join(classification.Evidence, "; "),
+		classification.ErrorCode,
+		classification.Confidence,
+	)
+
+	if classification.Category == "infrastructure" {
+		domain = "test-infrastructure"
+	}
+	if classification.Subcategory == "image-pull" {
+		module = moduleWithImagePullFailure()
+		if module != "" {
+			stage = "deployment"
+			boundary = "platform applied rendered module Deployment"
+			if imageReferenceLooksInvalid(strings.Join(classification.Evidence, " ")) {
+				domain = "module-configuration"
+			}
+		}
+	}
+
+	report := dagFailureEvidenceReport{Failures: []dagFailureEvidence{{
+		Module:                 module,
+		Domain:                 domain,
+		Stage:                  stage,
+		LastSuccessfulBoundary: boundary,
+		Message:                message,
+	}}}
+	data, err := json.MarshalIndent(report, "", "  ")
+	require.NoError(t, err, "marshal classified DAG failure report")
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o750), "create DAG report directory")                //nolint:gosec
+	require.NoError(t, os.WriteFile(path, append(data, '\n'), 0o600), "write classified DAG failure report") //nolint:gosec
+	t.Logf("Wrote classified DAG failure report to %s", path)
+}
+
+func moduleWithImagePullFailure() string {
+	report := lastHealthReport.Load()
+	if report == nil {
+		return ""
+	}
+	for _, registration := range modulebuiltin.Registrations() {
+		handler := registration.Handler
+		deploymentName := handler.GetName()
+		if named, ok := handler.(modulecontroller.DeploymentNamer); ok && named.GetDeploymentName() != "" {
+			deploymentName = named.GetDeploymentName()
+		}
+		for _, deployment := range report.Deployments.Data.Data {
+			if deployment.Namespace != testOpts.appsNamespace || deployment.Name != deploymentName {
+				continue
+			}
+			for _, pod := range report.Pods.Data.Data {
+				if pod.Namespace != deployment.Namespace || !selectorMatches(deployment.Spec.Selector.MatchLabels, pod.Labels) {
+					continue
+				}
+				for _, status := range pod.Status.InitContainerStatuses {
+					if status.State.Waiting != nil && (status.State.Waiting.Reason == "ImagePullBackOff" || status.State.Waiting.Reason == "ErrImagePull") {
+						return handler.GetName()
+					}
+				}
+				for _, status := range pod.Status.ContainerStatuses {
+					if status.State.Waiting != nil && (status.State.Waiting.Reason == "ImagePullBackOff" || status.State.Waiting.Reason == "ErrImagePull") {
+						return handler.GetName()
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func selectorMatches(selector, labels map[string]string) bool {
+	for key, value := range selector {
+		if labels[key] != value {
+			return false
+		}
+	}
+	return len(selector) > 0
+}
+
+func imageReferenceLooksInvalid(evidence string) bool {
+	lower := strings.ToLower(evidence)
+	for _, marker := range []string{"manifest unknown", "not found", "invalid reference", "invalidimagename", "does not exist"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func conditionStatus(obj *unstructured.Unstructured, conditionType string) string {
+	conditions, _, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
+	for _, raw := range conditions {
+		condition, ok := raw.(map[string]any)
+		if ok && condition["type"] == conditionType {
+			value, _ := condition["status"].(string)
+			return value
+		}
+	}
+	return ""
+}
+
+func moduleConditionStatus(obj *unstructured.Unstructured, conditionType string) string {
+	return conditionStatus(obj, conditionType)
+}
+
+func moduleReleaseVersion(obj *unstructured.Unstructured) string {
+	releases, _, _ := unstructured.NestedSlice(obj.Object, "status", "releases")
+	for _, raw := range releases {
+		release, ok := raw.(map[string]any)
+		if ok && release["name"] == "platform" {
+			value, _ := release["version"].(string)
+			return value
+		}
+	}
+	return ""
 }
 
 func (tc *DAGOrderingTestCtx) operatorDeploymentNN() types.NamespacedName {

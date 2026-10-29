@@ -49,11 +49,7 @@ The OpenShift E2E suite uses one shared Go harness with separate execution profi
 
 ### Conversion webhook tests
 
-The OpenShift `All` and `Tier3` suites run conversion tests after component and
-service tests. Targeted runs include them only when
-`E2E_TEST_CONVERSION_WEBHOOK=true` is set. The existing `E2E_TEST_WEBHOOK` flag
-still controls monitoring admission-webhook tests; it does not select conversion
-tests.
+The OpenShift `All` and `Tier3` suites run conversion tests after platform and service tests. Targeted runs include them only when `E2E_TEST_CONVERSION_WEBHOOK=true` is set.
 
 The conversion subtests are grouped by the CRD whose webhook is exercised:
 
@@ -260,7 +256,7 @@ kubectl wait --for=jsonpath='{.status.phase}'=Ready dsc/default-dsc --timeout=60
 E2E_TEST_CLEAN_UP_PREVIOUS_RESOURCES=false \
 E2E_TEST_DEPENDANT_OPERATORS_MANAGEMENT=false \
 E2E_TEST_SERVICES=false \
-E2E_TEST_WEBHOOK=false \
+
 E2E_TEST_OPERATOR_RESILIENCE=false \
 E2E_TEST_OPERATOR_V2TOV3UPGRADE=false \
 E2E_TEST_DSC_MANAGEMENT=false \
@@ -439,7 +435,7 @@ done
 | `PULL_SECRET` | *(required)* | Path to container registry auth config |
 | `E2E_TEST_PROFILE` | `full` | Execution profile: `core`, `synthetic`, `dag`, or `full` |
 | `E2E_TEST_SERVICES` | `true` | Enable/disable service tests |
-| `E2E_TEST_WEBHOOK` | `true` | Enable/disable the existing monitoring admission-webhook tests when the monitoring service suite runs. |
+
 | `E2E_TEST_CONVERSION_WEBHOOK` | auto | Conversion webhook scenarios run in full OpenShift `All`/`Tier3` suites. Set `true` to include them in a targeted run or `false` to disable them. DSC scenarios delete `default-dsc`; enable DSCI/DSC backup and restore for non-disposable clusters. |
 | `E2E_TEST_CONVERSION_WEBHOOK_DSC` | `true` | Include DSC conversion scenarios when conversion tests run. Set `false` for Platform-only conversion tests. |
 | `E2E_TEST_CONVERSION_WEBHOOK_PLATFORM` | `true` | Include Platform conversion scenarios when conversion tests run. Set `false` for DSC-only conversion tests. |

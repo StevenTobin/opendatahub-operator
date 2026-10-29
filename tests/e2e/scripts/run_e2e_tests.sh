@@ -64,8 +64,6 @@ validate_bool E2E_TEST_OPERATOR_RESILIENCE
 : "${E2E_TEST_OPERATOR_V2TOV3UPGRADE:=true}"
 validate_bool E2E_TEST_OPERATOR_V2TOV3UPGRADE
 
-: "${E2E_TEST_WEBHOOK:=true}"
-validate_bool E2E_TEST_WEBHOOK
 
 : "${E2E_TEST_CONVERSION_WEBHOOK:=true}"
 validate_bool E2E_TEST_CONVERSION_WEBHOOK
@@ -164,7 +162,6 @@ if [ "$USE_TEST_RETRY" = "true" ] || [ "$USE_TEST_RETRY" = "1" ]; then
     --test-dsc-management="$E2E_TEST_DSC_MANAGEMENT" \
     --test-operator-resilience="$E2E_TEST_OPERATOR_RESILIENCE" \
     --test-operator-v2tov3upgrade="$E2E_TEST_OPERATOR_V2TOV3UPGRADE" \
-    --test-webhook="$E2E_TEST_WEBHOOK" \
     --test-conversion-webhook="$E2E_TEST_CONVERSION_WEBHOOK" \
     --test-conversion-webhook-dsc="$E2E_TEST_CONVERSION_WEBHOOK_DSC" \
     --test-conversion-webhook-platform="$E2E_TEST_CONVERSION_WEBHOOK_PLATFORM" \
@@ -203,7 +200,6 @@ else
     --test-dsc-management="$E2E_TEST_DSC_MANAGEMENT" \
     --test-operator-resilience="$E2E_TEST_OPERATOR_RESILIENCE" \
     --test-operator-v2tov3upgrade="$E2E_TEST_OPERATOR_V2TOV3UPGRADE" \
-    --test-webhook="$E2E_TEST_WEBHOOK" \
     --test-conversion-webhook="$E2E_TEST_CONVERSION_WEBHOOK" \
     --test-conversion-webhook-dsc="$E2E_TEST_CONVERSION_WEBHOOK_DSC" \
     --test-conversion-webhook-platform="$E2E_TEST_CONVERSION_WEBHOOK_PLATFORM" \

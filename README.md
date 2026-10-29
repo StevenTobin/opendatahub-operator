@@ -927,7 +927,7 @@ Evn vars can be set to configure e2e tests:
 | E2E_TEST_DSC_VALIDATION                  | To configure the execution of DSCI/DSC validation tests, this is useful to run e2e tests for an operator running in xKS cluster                                                                                            | `true`                        |
 | E2E_TEST_OPERATOR_CONTROLLER             | To configure the execution of tests related to the Operator POD, this is useful to run e2e tests for an operator running out of the cluster i.e. for debugging purposes                                                    | `true`                        |
 | E2E_TEST_OPERATOR_RESILIENCE             | To configure the execution of operator resilience tests, useful for testing operator fault tolerance scenarios                                                                                                             | `true`                        |
-| E2E_TEST_WEBHOOK                         | To configure the execution of tests related to the Operator WebHooks, this is useful to run e2e tests for an operator running out of the cluster i.e. for debugging purposes                                               | `true`                        |
+
 | E2E_TEST_CONVERSION_WEBHOOK              | Run conversion webhook scenarios. Defaults to `true` in full and targeted runs; set to `false` to disable them. DSC scenarios delete `default-dsc`. | `true` |
 | E2E_TEST_CONVERSION_WEBHOOK_DSC          | Include DSC conversion scenarios when the conversion suite runs. Set `false` to run only Platform conversion scenarios. | `true` |
 | E2E_TEST_CONVERSION_WEBHOOK_PLATFORM     | Include Platform conversion scenarios when the conversion suite runs. Set `false` to run only DSC conversion scenarios. | `true` |
@@ -962,7 +962,7 @@ Alternatively the above configurations can be passed to e2e-tests as flags by se
 | --test-dsc-validation                 | To configure the execution of DSCI/DSC validation tests, this is useful to run e2e tests for an operator running in xKS cluster                                                                                            | `true`                        |
 | --test-operator-controller            | To configure the execution of tests related to the Operator POD, this is useful to run e2e tests for an operator running out of the cluster i.e. for debugging purposes                                                    | `true`                        |
 | --test-operator-resilience            | To configure the execution of operator resilience tests, useful for testing operator fault tolerance scenarios                                                                                                             | `true`                        |
-| --test-webhook                        | To configure the execution of tests related to the Operator WebHooks, this is useful to run e2e tests for an operator running out of the cluster i.e. for debugging purposes                                               | `true`                        |
+
 | --test-conversion-webhook             | Explicitly include or exclude conversion webhook scenarios; when omitted, only full OpenShift `All`/`Tier3` suites include them. DSC scenarios delete `default-dsc`. | auto |
 | --test-conversion-webhook-dsc         | Include DSC conversion scenarios when the conversion suite runs. | `true` |
 | --test-conversion-webhook-platform    | Include Platform conversion scenarios when the conversion suite runs. | `true` |
@@ -1018,13 +1018,13 @@ Run only the full production-module DAG integration test against an existing cor
 make e2e-test-dag
 ```
 
-Example commands to run test suite for the monitoring `service` only, with the operator running out of the cluster:
+Example commands to run the Auth platform service tests with the operator running out of the cluster:
 
 ```shell
 make run-nowebhook
 ```
 ```shell
-make e2e-test-run -e E2E_TEST_PROFILE=full -e E2E_TEST_OPERATOR_NAMESPACE=<namespace> -e E2E_TEST_OPERATOR_CONTROLLER=false -e E2E_TEST_WEBHOOK=false -e E2E_TEST_SERVICE=monitoring
+make e2e-test-run -e E2E_TEST_PROFILE=full -e E2E_TEST_OPERATOR_NAMESPACE=<namespace> -e E2E_TEST_OPERATOR_CONTROLLER=false -e E2E_TEST_SERVICE=auth
 ```
 
 
@@ -1120,7 +1120,7 @@ make e2e-test  # include other args as needed
 <summary>How do I run only tests for core services (monitoring, etc)?</summary>
 
 ```shell
-make e2e-test-run -e E2E_TEST_PROFILE=full -e E2E_TEST_OPERATOR_CONTROLLER=false -e E2E_TEST_WEBHOOK=false -e E2E_TEST_SERVICES=true -e E2E_TEST_DELETION_POLICY=never
+make e2e-test-run -e E2E_TEST_PROFILE=full -e E2E_TEST_OPERATOR_CONTROLLER=false -e E2E_TEST_SERVICES=true -e E2E_TEST_DELETION_POLICY=never
 ```
 
 </details>

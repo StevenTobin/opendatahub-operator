@@ -22,14 +22,14 @@ func TestApplyTestProfile(t *testing.T) {
 			dscValidationTest:                true,
 			operatorControllerTest:           true,
 			operatorResilienceTest:           true,
-			webhookTest:                      true,
-			conversionWebhookTest:            true,
-			conversionWebhookDSC:             true,
-			conversionWebhookPlatform:        true,
-			dagOrderingTest:                  true,
-			syntheticModuleTest:              true,
-			v2tov3upgradeTest:                true,
-			cleanUpPreviousResources:         true,
+
+			conversionWebhookTest:     true,
+			conversionWebhookDSC:      true,
+			conversionWebhookPlatform: true,
+			dagOrderingTest:           true,
+			syntheticModuleTest:       true,
+			v2tov3upgradeTest:         true,
+			cleanUpPreviousResources:  true,
 		}
 		Services.enabled = true
 	}
@@ -38,6 +38,7 @@ func TestApplyTestProfile(t *testing.T) {
 		reset()
 		require.NoError(t, applyTestProfile(ProfileCore))
 		assert.False(t, testOpts.dagOrderingTest)
+		assert.False(t, testOpts.dependantOperatorsManagementTest)
 		assert.True(t, testOpts.syntheticModuleTest)
 		assert.True(t, testOpts.dscManagementTest)
 		assert.False(t, testOpts.conversionWebhookDSC)

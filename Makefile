@@ -844,8 +844,10 @@ e2e-test-core:
 
 # DAG consumes the baseline established by core and owns module cleanup.
 e2e-test-dag:
+	$(if $(E2E_DAG_REPORT_PATH),@rm -f $(E2E_DAG_REPORT_PATH))
 	@$(MAKE) e2e-test-run \
 		-e E2E_TEST_PROFILE=dag \
+		$(if $(E2E_DAG_REPORT_PATH),-e E2E_DAG_REPORT_PATH=$(E2E_DAG_REPORT_PATH)) \
 		-e E2E_TEST_CLEAN_UP_PREVIOUS_RESOURCES=false \
 		-e E2E_TEST_DELETION_POLICY=never \
 		$(if $(ARTIFACT_DIR),-e JUNIT_OUTPUT_PATH=$(ARTIFACT_DIR)/junit-dag.xml)
@@ -916,7 +918,6 @@ e2e-setup-cluster:
 		-e E2E_TEST_PROFILE=core \
 		-e E2E_TEST_SYNTHETIC_MODULE=false \
 		-e E2E_TEST_SERVICES=false \
-		-e E2E_TEST_WEBHOOK=false \
 		-e E2E_TEST_CONVERSION_WEBHOOK=false \
 		-e E2E_TEST_OPERATOR_RESILIENCE=false \
 		-e E2E_TEST_OPERATOR_V2TOV3UPGRADE=false \
@@ -929,7 +930,6 @@ e2e-test-xks: ## Run e2e tests on external Kubernetes (KinD, AKS, CoreWeave, etc
 		-e E2E_TEST_PROFILE=full \
 		-e E2E_TEST_CLEAN_UP_PREVIOUS_RESOURCES=false \
 		-e E2E_TEST_DEPENDANT_OPERATORS_MANAGEMENT=false \
-		-e E2E_TEST_WEBHOOK=false \
 		-e E2E_TEST_CONVERSION_WEBHOOK=false \
 
 		-e E2E_TEST_SERVICES=true \

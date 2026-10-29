@@ -100,16 +100,16 @@ type TestContextConfig struct {
 	dscValidationTest                bool
 	operatorControllerTest           bool
 	operatorResilienceTest           bool
-	webhookTest                      bool
-	conversionWebhookTest            bool
-	conversionWebhookDSC             bool
-	conversionWebhookPlatform        bool
-	dagOrderingTest                  bool
-	syntheticModuleTest              bool
-	v2tov3upgradeTest                bool
-	circuitBreakerEnabled            bool
-	circuitBreakerThreshold          int
-	TestTimeouts                     TestTimeouts
+
+	conversionWebhookTest     bool
+	conversionWebhookDSC      bool
+	conversionWebhookPlatform bool
+	dagOrderingTest           bool
+	syntheticModuleTest       bool
+	v2tov3upgradeTest         bool
+	circuitBreakerEnabled     bool
+	circuitBreakerThreshold   int
+	TestTimeouts              TestTimeouts
 }
 
 // TestGroup defines the test groups.
@@ -155,9 +155,8 @@ var (
 		enabled:  true,
 		parallel: true,
 		scenarios: []map[string]TestFn{{
-			serviceApi.MonitoringServiceName: monitoringTestSuite,
-			serviceApi.AuthServiceName:       authControllerTestSuite,
-			serviceApi.GatewayServiceName:    gatewayTestSuite,
+			serviceApi.AuthServiceName:    authControllerTestSuite,
+			serviceApi.GatewayServiceName: gatewayTestSuite,
 		}},
 	}
 )
@@ -506,11 +505,9 @@ func TestOdhOperator(t *testing.T) {
 		mustRun(t, "DAG Ordering E2E Tests", dagOrderingTestSuite)
 	}
 
-	// Run monitoring before components — monitoring setup is a prerequisite.
-	mustRun(t, serviceApi.MonitoringServiceName, Services.RunSingle(serviceApi.MonitoringServiceName))
-
-	// Run remaining services (auth, gateway)
-	mustRun(t, Services.String(), Services.RunExcluding(serviceApi.MonitoringServiceName))
+	// Run platform-owned services (auth and gateway). Monitoring is a module
+	// and is covered by the registered-module contract and full DAG.
+	mustRun(t, Services.String(), Services.Run)
 
 	// Run operator resilience test suites after functional tests
 	if testOpts.operatorResilienceTest {
@@ -567,6 +564,7 @@ func applyTestProfile(profile TestProfile) error {
 	case ProfileFull:
 		return nil
 	case ProfileCore:
+		testOpts.dependantOperatorsManagementTest = false
 		testOpts.dagOrderingTest = false
 		// DSC conversion scenarios delete the singleton DSC. Keep Platform
 		// conversion coverage in core while preserving the baseline for DAG.
@@ -578,7 +576,6 @@ func applyTestProfile(profile TestProfile) error {
 		testOpts.dscValidationTest = false
 		testOpts.operatorControllerTest = false
 		testOpts.operatorResilienceTest = false
-		testOpts.webhookTest = false
 		testOpts.conversionWebhookTest = false
 		testOpts.conversionWebhookDSC = false
 		testOpts.conversionWebhookPlatform = false
@@ -592,7 +589,6 @@ func applyTestProfile(profile TestProfile) error {
 		testOpts.dscValidationTest = false
 		testOpts.operatorControllerTest = false
 		testOpts.operatorResilienceTest = false
-		testOpts.webhookTest = false
 		testOpts.conversionWebhookTest = false
 		testOpts.conversionWebhookDSC = false
 		testOpts.conversionWebhookPlatform = false
@@ -677,8 +673,6 @@ func TestMain(m *testing.M) {
 	checkEnvVarBindingError(viper.BindEnv("test-operator-resilience", viper.GetEnvPrefix()+"_OPERATOR_RESILIENCE"))
 	pflag.Bool("test-operator-v2tov3upgrade", true, "run V2 to V3 upgrade tests")
 	checkEnvVarBindingError(viper.BindEnv("test-operator-v2tov3upgrade", viper.GetEnvPrefix()+"_OPERATOR_V2TOV3UPGRADE"))
-	pflag.Bool("test-webhook", true, "run webhook tests")
-	checkEnvVarBindingError(viper.BindEnv("test-webhook", viper.GetEnvPrefix()+"_WEBHOOK"))
 	pflag.Bool("test-conversion-webhook", true, "run conversion webhook tests")
 	checkEnvVarBindingError(viper.BindEnv("test-conversion-webhook", viper.GetEnvPrefix()+"_CONVERSION_WEBHOOK"))
 	pflag.Bool("test-conversion-webhook-dsc", true, "run DSC conversion webhook tests")
@@ -762,7 +756,6 @@ func TestMain(m *testing.M) {
 	testOpts.dscValidationTest = viper.GetBool("test-dsc-validation")
 	testOpts.operatorResilienceTest = viper.GetBool("test-operator-resilience")
 	testOpts.v2tov3upgradeTest = viper.GetBool("test-operator-v2tov3upgrade")
-	testOpts.webhookTest = viper.GetBool("test-webhook")
 	testOpts.conversionWebhookTest = viper.GetBool("test-conversion-webhook")
 	testOpts.conversionWebhookDSC = viper.GetBool("test-conversion-webhook-dsc")
 	testOpts.conversionWebhookPlatform = viper.GetBool("test-conversion-webhook-platform")
@@ -847,6 +840,7 @@ func mustRun(t *testing.T, name string, testFunc func(t *testing.T), opts ...Tes
 
 	if !passed {
 		HandleTestFailure(name)
+
 		t.Logf("Stopping: %s test failed.", name)
 		t.Fail()
 	}
