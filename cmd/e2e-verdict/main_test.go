@@ -8,12 +8,13 @@ import (
 
 func TestEvaluate(t *testing.T) {
 	tests := []struct {
-		name      string
-		coreExit  int
-		dagExit   int
-		report    *dagReport
-		wantCode  int
-		wantState string
+		name       string
+		coreExit   int
+		dagExit    int
+		report     *dagReport
+		wantCode   int
+		wantState  string
+		wantReason string
 	}{
 		{name: "core failure", coreExit: 2, dagExit: -1, wantCode: 2, wantState: "failed"},
 		{name: "all pass", coreExit: 0, dagExit: 0, wantCode: 0, wantState: "passed"},
@@ -28,6 +29,17 @@ func TestEvaluate(t *testing.T) {
 			}},
 			wantCode:  0,
 			wantState: "passed-with-integration-warning",
+		},
+		{
+			name:     "tentative sole module attribution is warning",
+			coreExit: 0,
+			dagExit:  1,
+			report: &dagReport{Failures: []dagFailure{
+				{Module: "workbenches", PossibleModuleFailure: true, Domain: domainModuleConfiguration, Stage: "status"},
+			}},
+			wantCode:   0,
+			wantState:  "passed-with-integration-warning",
+			wantReason: "operator-owned contracts passed; a single unhealthy managed module was tentatively attributed as the DAG failure",
 		},
 		{
 			name:     "platform failure remains blocking",
@@ -57,6 +69,9 @@ func TestEvaluate(t *testing.T) {
 			got, code := evaluate(tt.coreExit, tt.dagExit, tt.report)
 			assert.Equal(t, tt.wantCode, code)
 			assert.Equal(t, tt.wantState, got.OperatorVerdict)
+			if tt.wantReason != "" {
+				assert.Equal(t, tt.wantReason, got.Reason)
+			}
 		})
 	}
 }

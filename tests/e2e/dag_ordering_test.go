@@ -1555,12 +1555,6 @@ func writeDAGClassificationReport(t *testing.T, tc *DAGOrderingTestCtx) {
 		domain = "test-infrastructure"
 	}
 	possibleModule := onlyUnhealthyManagedModule(tc)
-	if possibleModule != "" {
-		if module == "" {
-			module = possibleModule
-		}
-		message += fmt.Sprintf("; possible module failure: only unhealthy managed module is %s", possibleModule)
-	}
 
 	if classification.Subcategory == "image-pull" {
 		module = moduleWithImagePullFailure()
@@ -1571,6 +1565,14 @@ func writeDAGClassificationReport(t *testing.T, tc *DAGOrderingTestCtx) {
 				domain = "module-configuration"
 			}
 		}
+	}
+
+	if possibleModule != "" {
+		module = possibleModule
+		domain = "module-configuration"
+		stage = "status"
+		boundary = "module CR exists and peer managed modules are healthy"
+		message += fmt.Sprintf("; tentative module attribution: %s is the only unhealthy managed module", possibleModule)
 	}
 
 	report := dagFailureEvidenceReport{Failures: []dagFailureEvidence{{

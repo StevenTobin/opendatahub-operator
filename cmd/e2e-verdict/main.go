@@ -16,6 +16,7 @@ const (
 
 type dagFailure struct {
 	Module                 string `json:"module,omitempty"`
+	PossibleModuleFailure  bool   `json:"possibleModuleFailure,omitempty"`
 	Domain                 string `json:"domain"`
 	Stage                  string `json:"stage,omitempty"`
 	LastSuccessfulBoundary string `json:"lastSuccessfulBoundary,omitempty"`
@@ -103,7 +104,11 @@ func evaluate(coreExit, dagExit int, report *dagReport) (result, int) {
 	}
 
 	allModuleConfiguration := true
+	hasTentativeModuleAttribution := false
 	for _, failure := range report.Failures {
+		if failure.PossibleModuleFailure {
+			hasTentativeModuleAttribution = true
+		}
 		switch failure.Domain {
 		case domainModuleConfiguration:
 		case domainPlatformOperator, domainTestInfrastructure, domainUnknown:
@@ -113,11 +118,15 @@ func evaluate(coreExit, dagExit int, report *dagReport) (result, int) {
 		}
 	}
 	if allModuleConfiguration {
+		reason := "operator-owned contracts passed; DAG failures are attributed only to module configuration"
+		if hasTentativeModuleAttribution {
+			reason = "operator-owned contracts passed; a single unhealthy managed module was tentatively attributed as the DAG failure"
+		}
 		return result{
 			CoreStatus:      "passed",
 			DAGStatus:       "failed-module-configuration",
 			OperatorVerdict: "passed-with-integration-warning",
-			Reason:          "operator-owned contracts passed; DAG failures are attributed only to module configuration",
+			Reason:          reason,
 			Failures:        report.Failures,
 		}, 0
 	}
@@ -139,8 +148,8 @@ func printSummary(verdict result) {
 	fmt.Printf("  OPERATOR VERDICT: %s\n", verdict.OperatorVerdict)
 	fmt.Printf("  REASON:           %s\n", verdict.Reason)
 	for _, failure := range verdict.Failures {
-		fmt.Printf("  DAG FAILURE: module=%s domain=%s stage=%s boundary=%s message=%s\n",
-			failure.Module, failure.Domain, failure.Stage, failure.LastSuccessfulBoundary, failure.Message)
+		fmt.Printf("  DAG FAILURE: module=%s possibleModuleFailure=%t domain=%s stage=%s boundary=%s message=%s\n",
+			failure.Module, failure.PossibleModuleFailure, failure.Domain, failure.Stage, failure.LastSuccessfulBoundary, failure.Message)
 	}
 }
 
